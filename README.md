@@ -18,7 +18,9 @@ The repository now includes a runnable localhost research dashboard and correcte
 
 The full-feature pipeline fits PCA only on training hidden states, applies the same processor to validation and test records, saves per-example predictions, and reports 1,000-sample bootstrap confidence intervals. The current result supports a modest predictive improvement in AUROC for the logistic probe. It does not yet support causal, cross-model, or mitigation claims.
 
-## Run the Dashboard
+## Run the Dashboard Locally
+
+The dashboard is currently a local application and has not been deployed as a public website.
 
 From PowerShell in this directory:
 
@@ -26,7 +28,7 @@ From PowerShell in this directory:
 .\run_dashboard.ps1
 ```
 
-Then open [http://127.0.0.1:8766](http://127.0.0.1:8766).
+After the server starts, open `http://127.0.0.1:8766` in a browser on the same computer.
 
 The chat runs real local GGUF models through llama.cpp. Select **Qwen2.5 1.5B**, **Phi-3 Mini 3.8B**, or **Qwen3 4B** in the sidebar. The first message to a model loads it into memory and may take longer. For each factual question the dashboard:
 
