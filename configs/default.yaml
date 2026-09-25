@@ -1,0 +1,164 @@
+# ============================================
+# Default Configuration for Hallucination Detection Project
+# ============================================
+
+# --- Hardware & Runtime ---
+hardware:
+  device: "cuda"  # "cuda" or "cpu"
+  dtype: "float16"
+  max_memory_gb: 16
+  seed: 42
+
+# --- Models ---
+models:
+  primary:
+    name: "Qwen/Qwen2.5-1.5B-Instruct"
+    short_name: "qwen2.5-1.5b"
+    quantization: "4bit"  # "4bit", "8bit", or "none"
+    quantization_config:
+      load_in_4bit: true
+      bnb_4bit_compute_dtype: "float16"
+      bnb_4bit_quant_type: "nf4"
+      bnb_4bit_use_double_quant: true
+  
+  secondary:
+    name: "google/gemma-2b"
+    short_name: "gemma-2b"
+    quantization: "4bit"
+    quantization_config:
+      load_in_4bit: true
+      bnb_4bit_compute_dtype: "float16"
+      bnb_4bit_quant_type: "nf4"
+      bnb_4bit_use_double_quant: true
+  
+  alternate:
+    name: "microsoft/Phi-3-mini-4k-instruct"
+    short_name: "phi-3-mini"
+    quantization: "4bit"
+    quantization_config:
+      load_in_4bit: true
+      bnb_4bit_compute_dtype: "float16"
+      bnb_4bit_quant_type: "nf4"
+      bnb_4bit_use_double_quant: true
+
+# --- Dataset ---
+dataset:
+  name: "ragtruth"
+  source: "nvidia/ragtruth"  # HuggingFace dataset path (to be confirmed)
+  subset_size: 750  # Target ~500-1000, using 750 as balanced middle
+  gold_subset_size: 65  # Target ~50-80
+  splits:
+    train: 0.70
+    val: 0.15
+    test: 0.15
+  stratify_by: "label"  # Ensure balanced grounded/hallucinated
+  random_seed: 42
+
+# --- Signal Extraction ---
+extraction:
+  # Which signals to extract
+  signals:
+    attention_weights: true
+    hidden_states: true
+    logit_entropy: true
+    token_probabilities: true
+  
+  # Which layers to extract from (relative to total layers)
+  # "all" or list of layer indices, or "strategic" for [early, mid, late]
+  layer_strategy: "strategic"
+  strategic_layers: "auto"  # Will pick layers 0, n//4, n//2, 3n//4, n-1
+  
+  # Generation settings
+  generation:
+    max_new_tokens: 256
+    temperature: 1.0  # Keep at 1.0 for meaningful entropy
+    do_sample: false  # Greedy for reproducibility
+    top_p: 1.0
+  
+  # Batching
+  batch_size: 1  # Per-example for hook recording
+  save_dir: "outputs/signals"
+  save_format: "pt"  # PyTorch tensor format
+
+# --- Probe Classifier ---
+probe:
+  # Feature engineering
+  features:
+    # Per-token features aggregated across generation
+    aggregation: ["mean", "max", "std", "last"]
+    # Which signals to include
+    include_entropy: true
+    include_attention: true
+    include_hidden_states: true
+    # PCA dimensionality reduction for hidden states
+    hidden_state_pca_dim: 64
+  
+  # Entropy-only baseline
+  entropy_baseline:
+    type: "logistic_regression"
+    features: ["mean_entropy", "max_entropy", "std_entropy", "final_entropy"]
+  
+  # Logistic regression probe
+  logistic:
+    C: 1.0  # Regularization
+    max_iter: 1000
+    class_weight: "balanced"
+  
+  # MLP probe
+  mlp:
+    hidden_dims: [128, 64]
+    dropout: 0.3
+    learning_rate: 0.001
+    weight_decay: 0.01
+    epochs: 50
+    batch_size: 32
+    early_stopping_patience: 5
+
+# --- Causal Validation ---
+causal:
+  patching:
+    # Number of example pairs to test
+    num_pairs: 50
+    # Patch at these layers (relative indices)
+    patch_layers: "strategic"  # Same as extraction
+    # Patch which components
+    patch_components: ["residual_stream", "attention_output", "mlp_output"]
+    # Success threshold for flip detection
+    flip_threshold: 0.5  # Probability shift needed to count as "flipped"
+  
+  steering:
+    # Direction computation
+    num_direction_examples: 100  # Examples to compute steering direction
+    # Steering strength (alpha)
+    alpha_range: [0.5, 1.0, 2.0, 3.0, 5.0]  # Test multiple strengths
+    # Apply at these layers
+    steer_layers: "auto"  # Automatically pick best layer from patching results
+
+# --- Baselines ---
+baselines:
+  selfcheckgpt:
+    num_samples: 5  # Number of regenerations
+    method: "bertscore"  # "bertscore", "mqag", "ngram", "nli"
+  
+  semantic_entropy:
+    num_samples: 5
+    temperature: 0.7
+    clustering_method: "nli"  # Use NLI for semantic equivalence
+
+# --- Evaluation ---
+evaluation:
+  metrics: ["precision", "recall", "f1", "auroc", "auprc"]
+  bootstrap_n: 1000  # For confidence intervals
+  significance_level: 0.05
+
+# --- Paths ---
+paths:
+  data_dir: "data/processed"
+  raw_data_dir: "data/raw"
+  gold_dir: "data/gold"
+  signal_dir: "outputs/signals"
+  probe_dir: "outputs/probes"
+  causal_dir: "outputs/causal"
+  results_dir: "outputs/results"
+  figures_dir: "outputs/figures"
+  logs_dir: "outputs/logs"

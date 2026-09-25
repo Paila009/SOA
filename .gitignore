@@ -1,0 +1,60 @@
+# Hallucination Detection via Internal Uncertainty Signatures
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+*.egg
+
+# Virtual environments
+venv/
+env/
+.venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Data (downloaded, not committed)
+data/raw/
+data/processed/
+data/gold/
+
+# Model weights (too large for git)
+models/weights/
+models-local/
+*.bin
+*.safetensors
+*.gguf
+
+# Downloaded local inference binaries
+runtime/
+
+# Outputs (generated during experiments)
+outputs/
+*.pt
+*.joblib
+
+# Logs
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Secrets
+.env
+*.key
+.runtime/
+__pycache__/
+*.pyc

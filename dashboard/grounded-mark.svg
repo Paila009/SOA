@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title desc">
+  <title id="title">Grounded Research Studio</title>
+  <desc id="desc">A dimensional letter G built from a luminous evidence prism</desc>
+  <defs>
+    <linearGradient id="surface" x1="8" y1="6" x2="55" y2="58" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#2F4569"/>
+      <stop offset="1" stop-color="#10192B"/>
+    </linearGradient>
+    <linearGradient id="edge" x1="12" y1="10" x2="52" y2="55" gradientUnits="userSpaceOnUse"><stop stop-color="#C5E7FF"/><stop offset=".5" stop-color="#9AA4EF"/><stop offset="1" stop-color="#64BCD3"/></linearGradient>
+    <linearGradient id="face" x1="22" y1="12" x2="45" y2="46" gradientUnits="userSpaceOnUse"><stop stop-color="#D6F9FF"/><stop offset="1" stop-color="#70C2E6"/></linearGradient>
+  </defs>
+  <rect x="2" y="2" width="60" height="60" rx="18" fill="url(#surface)" stroke="#9AAFD0" stroke-opacity=".28"/>
+  <path d="M31 10 49 20v6l-8-4-10-5-13 7v17l13 7 13-7v-6H32v-7h20v18L31 58 10 46V22Z" fill="#050C1C" opacity=".5" transform="translate(1 -1)"/>
+  <path d="M31 8 50 19l-7 4-12-7-13 8v16l13 8 13-8v-5H32v-8h20v17L31 56 10 44V20Z" fill="url(#edge)"/>
+  <path d="m10 20 8 4v16l-8 4Z" fill="#7C95C2"/>
+  <path d="m31 8 19 11-7 4-12-7-13 8-8-4Z" fill="url(#face)"/>
+  <path d="m31 48 13-8 8 4-21 12Z" fill="#6C91C5"/>
+  <path d="M32 27h20l-8 8H32Z" fill="#C4EBFC"/>
+  <path d="m11 20 20-11 18 10M19 24l12-7 11 6" fill="none" stroke="#E6FDFF" stroke-opacity=".5" stroke-width=".8"/>
+</svg>

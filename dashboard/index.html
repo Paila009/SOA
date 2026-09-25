@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Grounded — Research Studio</title>
+  <meta name="description" content="Your local AI research studio. Explore questions, compare models, and inspect the evidence behind each answer.">
+  <meta name="theme-color" content="#090c16">
+  <link rel="icon" href="/grounded-mark.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/style.css?v=20260925-studio-3d">
+</head>
+<body>
+  <svg class="icon-library" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-spark" viewBox="0 0 24 24"><path d="m12 3 2.5 6.5L21 12l-6.5 2.5L12 21l-2.5-6.5L3 12l6.5-2.5L12 3Z"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4.5 4.5"/></symbol>
+    <symbol id="i-shield" viewBox="0 0 24 24"><path d="m12 3 8 3v6c0 4-4 7-8 9-4-2-8-5-8-9V6l8-3Z"/><path d="m8 12 3 3 5-6"/></symbol>
+    <symbol id="i-layers" viewBox="0 0 24 24"><path d="m3 8 9-5 9 5-9 5-9-5Zm0 5 9 5 9-5M3 18l9 5 9-5"/></symbol>
+    <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M12 19V5m-6 6 6-6 6 6"/></symbol>
+    <symbol id="i-external" viewBox="0 0 24 24"><path d="M6 18 18 6M6 6h12v12"/></symbol>
+    <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 7h5m4 0h7M4 17h9m4 0h3"/><circle cx="11" cy="7" r="2"/><circle cx="15" cy="17" r="2"/></symbol>
+    <symbol id="i-reset" viewBox="0 0 24 24"><path d="M4 10a8 8 0 1 1 1 8M4 4v6h6"/></symbol>
+    <symbol id="i-document" viewBox="0 0 24 24"><path d="M6 3h8l4 4v14H6V3Zm8 0v5h4M9 12h6m-6 4h6"/></symbol>
+    <symbol id="i-compare" viewBox="0 0 24 24"><path d="M7 3v18M17 3v18M3 7h8m2 10h8M4 16l3-3 3 3m4-8 3 3 3-3"/></symbol>
+  </svg>
+  <div class="ambient" aria-hidden="true"><div class="ambient-orb orb-one"></div><div class="ambient-orb orb-two"></div></div>
+  <div class="shell">
+    <aside class="sidebar surface" id="settings-panel" aria-label="Model and search settings">
+      <button id="close-settings" class="drawer-close" type="button" aria-label="Close settings">×</button>
+      <a class="brand" href="/" aria-label="Grounded home"><span class="brand-mark"><img src="/grounded-mark.svg" alt=""></span><span><b>grounded<span class="brand-dot">.</span></b><small>RESEARCH STUDIO</small></span></a>
+      <button id="new-chat" class="new-chat"><svg class="icon"><use href="#i-plus"/></svg><span>New conversation</span><kbd>＋</kbd></button>
+
+      <section class="side-section model-section">
+        <div class="section-caption"><span>YOUR INTELLIGENCE</span><span>01</span></div>
+        <label class="field-label" for="model-select"><svg class="icon"><use href="#i-layers"/></svg>Generation model</label>
+        <div class="select-wrap"><select id="model-select" aria-describedby="model-detail"></select><span id="model-dot" class="availability"></span></div>
+        <p id="model-detail" class="field-help">Connecting to your local models…</p>
+        <div class="runtime-proof">
+          <div><span>ENGINE</span><b id="runtime-engine">llama.cpp</b></div>
+          <div><span>MODEL</span><b id="runtime-model">—</b></div>
+          <div><span>LAST RUN</span><b id="runtime-last">Waiting</b></div>
+        </div>
+      </section>
+
+      <section class="side-section search-settings control-card">
+        <div class="section-line"><span><svg class="icon"><use href="#i-search"/></svg>Live retrieval</span><label class="switch"><input id="web-search" type="checkbox" checked aria-label="Search before answering"><i></i></label></div>
+        <label class="range-label" for="max-sources"><span>Sources per answer</span><b id="max-sources-label">4</b></label>
+        <input id="max-sources" type="range" min="1" max="6" step="1" value="4">
+        <p class="field-help">Search Wikipedia for evidence before answering.</p>
+      </section>
+
+      <section class="side-section control-card guard-settings">
+        <div class="section-line"><span><svg class="icon"><use href="#i-shield"/></svg>Evidence guard</span><label class="switch"><input id="guardrail" type="checkbox" checked aria-label="Enable evidence guard"><i></i></label></div>
+        <label class="range-label" for="risk-threshold"><span>Review threshold</span><b id="risk-threshold-label">50%</b></label>
+        <input id="risk-threshold" type="range" min="0.15" max="0.85" step="0.05" value="0.50">
+        <p class="field-help">Filter claims with weak evidence matches.</p>
+      </section>
+
+      <section class="side-section detector-card">
+        <div class="section-line"><span>Research benchmark</span><span class="status-ready">OFFLINE TEST</span></div>
+        <strong>Full logistic probe</strong>
+        <div class="detector-stats"><span><b>0.715</b> AUROC</span><span><b>0.655</b> F1</span><span><b>331</b> signals</span></div>
+        <p class="field-help">Held-out results. Live chat uses text matching.</p>
+        <button id="show-research" class="text-button">Explore the results <svg class="icon"><use href="#i-external"/></svg></button>
+      </section>
+      <div class="sidebar-foot"><span class="local-dot"></span>Local models. Your workspace.<span class="foot-symbol">G / 01</span></div>
+    </aside>
+
+    <main class="workspace surface">
+      <header class="workspace-head">
+        <div class="workspace-title"><span class="title-icon"><svg class="icon"><use href="#i-spark"/></svg></span><div><span class="crumb">RESEARCH STUDIO</span><h1>Grounded chat</h1></div></div>
+        <div class="head-status"><span id="runtime-status"><i></i>Connecting</span><button id="clear-chat" title="Clear conversation" aria-label="Clear conversation"><svg class="icon"><use href="#i-reset"/></svg></button></div>
+        <div class="mobile-actions"><button id="open-settings" type="button" aria-controls="settings-panel" aria-expanded="false"><svg class="icon"><use href="#i-sliders"/></svg><span>Models</span></button><button id="open-analysis" type="button" aria-controls="analysis-panel" aria-expanded="false"><svg class="icon"><use href="#i-shield"/></svg><span data-analysis-label>Analysis</span></button></div>
+      </header>
+      <div class="session-bar"><span class="model-tag"><span class="local-dot"></span><span id="active-model-name">Local model</span></span><span id="session-caption">New session</span></div>
+
+      <div class="conversation" id="conversation" role="log" aria-label="Conversation" aria-live="polite" aria-relevant="additions">
+        <section id="welcome" class="welcome">
+          <div class="signal-stage"><canvas id="signal-scene" aria-hidden="true"></canvas><span class="orb-label label-left"><svg class="icon"><use href="#i-search"/></svg>Explore</span><span class="orb-label label-right"><svg class="icon"><use href="#i-shield"/></svg>Verify</span><span class="stage-caption">A LITTLE MORE CLARITY.</span></div>
+          <span class="welcome-kicker"><i></i> INTELLIGENCE, WITH EVIDENCE</span>
+          <h2>Great questions.<br><em>Grounded answers.</em></h2>
+          <p>A space to explore ideas, compare perspectives,<br class="desktop-break"> and inspect the evidence behind an answer.</p>
+          <div class="starter-grid">
+            <button class="starter" data-example="search"><span class="starter-icon"><svg class="icon"><use href="#i-search"/></svg></span><b>Explore a topic</b><span>Follow the evidence</span><svg class="icon starter-arrow"><use href="#i-external"/></svg></button>
+            <button class="starter" data-example="compare"><span class="starter-icon"><svg class="icon"><use href="#i-compare"/></svg></span><b>Compare ideas</b><span>See both perspectives</span><svg class="icon starter-arrow"><use href="#i-external"/></svg></button>
+            <button class="starter" data-example="research"><span class="starter-icon"><svg class="icon"><use href="#i-layers"/></svg></span><b>Explore the research</b><span>Understand the results</span><svg class="icon starter-arrow"><use href="#i-external"/></svg></button>
+          </div>
+        </section>
+      </div>
+
+      <section class="composer-zone" aria-label="Send a message">
+        <div id="pipeline-status" class="pipeline-status" role="status" hidden><span class="pipeline-dot"></span><b id="pipeline-label">Searching sources</b><small id="pipeline-detail">Preparing retrieval…</small></div>
+        <div class="composer-card">
+          <details id="context-panel">
+            <summary><span><svg class="icon"><use href="#i-plus"/></svg>Add your evidence <em>optional</em></span><small id="context-count">0 characters</small></summary>
+            <textarea id="context-input" aria-label="Private evidence" placeholder="Paste the notes or passages you want the model to use…"></textarea>
+          </details>
+          <div class="composer">
+            <textarea id="question-input" rows="1" aria-label="Your message" placeholder="Where should we start?"></textarea>
+            <button id="stop-button" class="stop-button" hidden title="Stop response" aria-label="Stop response">■</button>
+            <button id="send-button" class="send-button" title="Send question" aria-label="Send question"><svg class="icon"><use href="#i-arrow"/></svg></button>
+          </div>
+        </div>
+        <div class="composer-foot"><span><kbd>↵</kbd> Send <span class="foot-divider">·</span> Shift + Enter for a new line</span><span id="active-mode">Guardrail on</span></div>
+      </section>
+    </main>
+
+    <aside class="inspector surface" id="analysis-panel" aria-label="Answer evidence and metrics">
+      <header><div><span class="crumb">THE EVIDENCE LAYER</span><h2>Answer insights<span class="heading-dot">.</span></h2></div><span id="analysis-state" class="analysis-state idle">IDLE</span><button id="close-analysis" class="drawer-close" type="button" aria-label="Close analysis">×</button></header>
+      <section class="risk-card">
+        <div class="risk-ring" id="risk-ring"><div><strong id="risk-value">—</strong><span>MATCH RISK</span></div></div>
+        <div><h3 id="risk-title">Ready to explore</h3><p id="risk-description">Ask a question to see how the answer connects to its evidence.</p></div>
+      </section>
+      <section class="metric-grid" aria-label="Answer metrics">
+        <article><span>Evidence match</span><strong id="support-value">—</strong><small>source text overlap</small></article>
+        <article><span>Response time</span><strong id="latency-value">—</strong><small>retrieval + generation</small></article>
+        <article><span>Unmatched claims</span><strong id="unsupported-value">—</strong><small>sentences to review</small></article>
+        <article><span>Guard action</span><strong id="action-value">—</strong><small>evidence decision</small></article>
+      </section>
+      <div class="review-stack">
+        <section class="sources-panel"><div class="panel-head"><h3><svg class="icon"><use href="#i-document"/></svg>Sources</h3><span id="source-total">0 sources</span></div><div id="source-list" class="empty-evidence">Your sources will appear here.<br>Retrieved passages, ready to review.</div></section>
+        <section class="evidence-panel"><div class="panel-head"><h3><svg class="icon"><use href="#i-shield"/></svg>Claim review</h3><span id="sentence-total">0 sentences</span></div><div id="sentence-list" class="empty-evidence">A closer look at each claim,<br>and the passage behind it.</div><p class="review-caveat">Text matches are a screening signal. The research probe is separate from live chat.</p></section>
+      </div>
+      <section class="legend" aria-label="Evidence match legend"><span><i class="supported"></i>Strong</span><span><i class="uncertain"></i>Partial</span><span><i class="unsupported"></i>Unmatched</span></section>
+    </aside>
+  </div>
+  <div id="mobile-backdrop" class="mobile-backdrop" hidden></div>
+  <dialog id="research-dialog" aria-labelledby="research-title">
+    <form method="dialog"><button class="dialog-close" aria-label="Close research results">×</button></form>
+    <span class="crumb">BEHIND THE RESEARCH</span><h2 id="research-title">Measured, not assumed.</h2>
+    <p>Probe results on the same 115 held-out examples, with dimensionality reduction fitted on training data.</p>
+    <div id="research-cards" class="research-cards"></div>
+    <div class="research-note">These offline results do not establish live-chat accuracy, causal validity, cross-model transfer, or steering effectiveness. Those experiments remain separate.</div>
+  </dialog>
+  <script src="/app.js?v=20260925-studio-3d"></script>
+  <script src="/scene.js?v=20260925-studio-3d" defer></script>
+</body>
+</html>
