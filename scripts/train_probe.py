@@ -5,13 +5,15 @@ import json
 import sys
 from pathlib import Path
 
+ROOT = Path(__file__).resolve().parents[1]
+sys.path[:0] = [str(ROOT / ".runtime"), str(ROOT)]
+
 import numpy as np
 import torch
 from loguru import logger
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
 from evaluation.metrics import bootstrap_confidence_intervals
+from evaluation.label_provenance import validate_response_labels
 from extraction.signals import SignalProcessor
 from probes.probe_classifiers import EntropyBaseline, LogisticProbe, MLPProbe, extract_entropy_features
 
@@ -147,6 +149,7 @@ def main():
         "test": select_split(signal_index, args.test_split),
     }
     validate_splits(splits)
+    validate_response_labels(splits)
     y = {name: split_labels(items) for name, items in splits.items()}
     logger.info("Explicit ID split: " + ", ".join(f"{k}={len(v)}" for k, v in splits.items()))
 

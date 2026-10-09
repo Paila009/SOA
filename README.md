@@ -6,17 +6,25 @@
 **Hardware:** HP Victus, 16GB RAM, NVIDIA GPU — Consumer Laptop Scale  
 **Research model:** Qwen2.5-1.5B-Instruct. **Local chat choices:** Qwen2.5-1.5B, Phi-3 Mini 3.8B, Qwen3 4B (Q4_K_M). Gemma transfer remains a planned research experiment.
 
+## Customer research workspace — unified local/API edition
+
+A customer-facing application lives in `customer/`. Its single model selector supports the three installed local GGUF models and optional server-side Groq, Gemini, or OpenRouter API models. It includes Firebase email/Google login, account-scoped conversations and text-document libraries, streaming answers with Stop, and a saved evidence review attached to each answer. API models appear only when the owner supplies a server-side key, exact model ID, and the applicable free-only confirmation; there are no automatic paid fallbacks.
+
+Run `./run_customer.ps1` after the one-time installation in [the customer setup guide](docs/CUSTOMER_SETUP.md). The authenticated local workspace is at `http://localhost:8770`. Local and API models now use this same viewer; the older port-8766 dashboard remains only for specialist experiment controls and is not required for ordinary chat. A static, interactive product showcase is published with GitHub Pages; live login, chat, retrieval, histories, and model execution still require the Python backend.
+
+**Connection status:** Firebase Google login and all three installed local chat models are connected. A real Qwen smoke response has been verified in the customer runtime. No API-provider key/model is configured, so Groq/Gemini/OpenRouter remain optional and disconnected. Local evidence reviews and API reviews are fallible screening methods; neither establishes calibrated hallucination accuracy.
+
 ## Current Verified Status
 
-The repository now includes a runnable localhost research dashboard and corrected probe training. The completed Qwen experiment uses 749 saved signal artifacts and explicit dataset-ID splits: 522 train, 112 validation, and 115 test examples.
+The repository includes a runnable localhost research dashboard. The repaired experiment teacher-forces Qwen over all 749 exact annotated responses and uses explicit dataset-ID splits: 522 train, 112 validation, and 115 test examples. The original mismatched artifacts remain preserved as legacy results. See [the F1 audit](docs/F1_AUDIT.md).
 
 | Completed method | Features | Test AUROC | Test F1 |
 |---|---:|---:|---:|
-| Entropy baseline | 8 | 0.6999 | 0.6610 |
-| Full logistic probe | 331 | 0.7154 | 0.6552 |
-| MLP probe | 331 | 0.6688 | 0.6429 |
+| Entropy baseline | 8 | 0.7232 | 0.6496 |
+| Full logistic probe | 331 | 0.7979 | 0.7167 |
+| MLP probe | 331 | 0.8194 | 0.7611 |
 
-The full-feature pipeline fits PCA only on training hidden states, applies the same processor to validation and test records, saves per-example predictions, and reports 1,000-sample bootstrap confidence intervals. The current result supports a modest predictive improvement in AUROC for the logistic probe. It does not yet support causal, cross-model, or mitigation claims.
+The full-feature pipeline fits PCA only on training hidden states and saves per-example predictions and bootstrap intervals. Labels and evaluated response text are now aligned, but 172 prompts were left-truncated to the 1,024-token extraction window. This is a teacher-forced, same-model held-out classification experiment—not calibrated live-chat accuracy. No causal, cross-model, or mitigation claim is established.
 
 ## Run the Dashboard Locally
 
@@ -32,13 +40,19 @@ After the server starts, open `http://127.0.0.1:8766` in a browser on the same c
 
 The chat runs real local GGUF models through llama.cpp. Select **Qwen2.5 1.5B**, **Phi-3 Mini 3.8B**, or **Qwen3 4B** in the sidebar. The first message to a model loads it into memory and may take longer. For each factual question the dashboard:
 
-1. searches Wikipedia for attributable source passages (comparison questions search each subject separately);
+1. searches Wikipedia with retry, relevance ranking, deduplication, diagnostics, and a short-lived local cache (comparison questions search each subject separately);
 2. sends those passages to the selected local model;
-3. checks each claim against a single passage and checks explicit source numbers, negation, and numbers;
-4. calculates answer support, query relevance, hallucination risk, latency, and unsupported-sentence counts; and
+3. checks each claim against one attributable passage using lexical/paraphrase, entity, number/date, citation, and negation signals;
+4. reports evidence coverage separately from weakest-claim risk, with supported, partial, contradicted, and unverified outcomes; and
 5. blocks the generated answer when the selected risk threshold is exceeded.
 
-The UI also supports cancelling an active request, adding optional private evidence, disabling search for controlled experiments, and switching to an extractive evidence-only fallback. Verified probe results are available from the research-results dialog. The live text-overlap guard is **not** the trained activation probe and cannot prove factual truth; it can miss paraphrases and subtle contradictions. The offline probe's AUROC/F1 must not be presented as live-chat accuracy.
+The UI also supports cancelling an active request, importing local PDF/text evidence, disabling search for controlled experiments, switching to an extractive evidence-only fallback, comparing installed models under shared settings, and exporting a privacy-safe local experiment history. Guided adversarial demos are included in the research dialog. See [`ENHANCEMENT_TODO.md`](ENHANCEMENT_TODO.md) for the completed implementation checklist and [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) for privacy, hardware, licensing, and deployment limits.
+
+Aligned probe results are available from the research-results dialog; the legacy artifacts remain on disk for auditability. The live evidence guard uses a local NLI model when installed, with an explicitly labeled lexical fallback. It cannot prove factual truth, and its scores are not calibrated probabilities. The experimental Qwen internal-probe model extracts token entropy, observed-token probabilities, and block activations, then applies the fitted 331-feature processor. Its raw classifier score never controls blocking. Standard llama.cpp models do not expose these internal features.
+
+Install optional local models with `python scripts/setup_verifier.py` (NLI) and `python scripts/setup_verifier.py --research` (experimental Qwen). They require transformers, torch, and safetensors; weights remain ignored by Git. Run `python scripts/evaluate_live_verifier.py` for 20 authored diagnostic cases. These development cases are not an independent accuracy benchmark. See [the reliability checklist](ENHANCEMENT_TODO.md) for remaining validation work.
+
+Chat uses background inference jobs with token/claim events. Stop requests close llama.cpp streaming connections or interrupt Transformers between forward passes. Loading and an in-progress forward pass may finish before cancellation takes effect. Comparisons retrieve once and share a hashed evidence snapshot and generation settings; wording overlap is not factual agreement.
 
 The added weights come from the [official Microsoft Phi-3 Mini GGUF](https://huggingface.co/microsoft/Phi-3-mini-4k-instruct-gguf) (MIT) and [official Qwen3 4B GGUF](https://huggingface.co/Qwen/Qwen3-4B-GGUF) (Apache-2.0) repositories. They run locally; no paid model API is used. Searches still require internet access.
 
@@ -56,6 +70,7 @@ Consolidate the completed results with:
 
 ```powershell
 python scripts\run_benchmark.py
+python scripts\evaluate_detectors.py
 ```
 
 Result artifacts are written to `outputs/probes` and `outputs/results`.

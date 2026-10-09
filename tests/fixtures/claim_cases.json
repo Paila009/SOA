@@ -1,0 +1,22 @@
+[
+ {"category":"exact","source":"Paris is the capital of France.","claim":"Paris is the capital of France.","label":"supported"},
+ {"category":"paraphrase","source":"A woman is riding a bicycle.","claim":"A woman is cycling.","label":"supported"},
+ {"category":"paraphrase","source":"The museum opens every day at nine in the morning.","claim":"The museum opens at 9 a.m. daily.","label":"supported"},
+ {"category":"paraphrase","source":"Marie Curie worked as a physicist and chemist.","claim":"Marie Curie was a scientist.","label":"supported"},
+ {"category":"paraphrase","source":"Cricket is played by two teams, each consisting of eleven players.","claim":"Each cricket team has eleven players.","label":"supported"},
+ {"category":"number","source":"The project has 4 models.","claim":"The project has 5 models.","label":"contradicted"},
+ {"category":"date","source":"The mission launched in 2021.","claim":"The mission launched in 2024.","label":"contradicted"},
+ {"category":"negation","source":"Paris is the capital of France.","claim":"Paris is not the capital of France.","label":"contradicted"},
+ {"category":"entity","source":"Paris is the capital of France.","claim":"London is the capital of France.","label":"contradicted"},
+ {"category":"missing_date","source":"The mission launched successfully.","claim":"The mission launched in 2024.","label":"unverified"},
+ {"category":"missing_name","source":"A scientist won an award.","claim":"Marie Curie won an award.","label":"unverified"},
+ {"category":"missing_detail","source":"Marie Curie studied radioactivity.","claim":"Marie Curie owned three cats.","label":"unverified"},
+ {"category":"missing_evidence","source":"","claim":"Paris is the capital of France.","label":"unverified"},
+ {"category":"missing_number","source":"The company hired engineers.","claim":"The company hired 50 engineers.","label":"unverified"},
+ {"category":"negation","source":"The library is not open on Sundays.","claim":"The library is open on Sundays.","label":"contradicted"},
+ {"category":"number","source":"There are exactly five apples in the basket.","claim":"There are exactly seven apples in the basket.","label":"contradicted"},
+ {"category":"nonconflicting_number","source":"The mission launched in 2021 and landed in 2024.","claim":"The mission landed in 2024.","label":"supported"},
+ {"category":"nonconflicting_negation","source":"The museum is free. The cafe is not free.","claim":"The museum is free.","label":"supported"},
+ {"category":"unrelated","source":"The library opens at ten.","claim":"Mars has two moons.","label":"unverified"},
+ {"category":"unsupported_extension","source":"Ada Lovelace wrote notes about the Analytical Engine.","claim":"Ada Lovelace designed the first smartphone.","label":"unverified"}
+]

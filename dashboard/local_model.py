@@ -1,6 +1,8 @@
 """Run actual local GGUF chat models using the bundled llama.cpp server."""
 
 import json
+import http.client
+import socket
 import os
 import re
 import subprocess
@@ -94,11 +96,16 @@ class LocalModelRuntime:
             finally:
                 self.loading = False
 
-    def _complete(self, messages, max_tokens=320, temperature=0.15, timeout=180):
+    def _complete(self, messages, max_tokens=320, temperature=0.15, timeout=180,
+                  on_token=None, job=None):
+        if job:
+            job.check()
         if not self.is_ready():
             self.ensure_started(background=False)
         if not self.is_ready():
             raise RuntimeError(self.error or f"{self.spec['name']} is not ready")
+        if on_token is not None or job is not None:
+            return self._stream(messages, max_tokens, temperature, timeout, on_token, job)
         body = json.dumps({"model": self.spec["file"], "messages": messages,
                            "temperature": temperature, "top_p": 0.9,
                            "max_tokens": max_tokens, "stream": False}).encode("utf-8")
@@ -113,7 +120,56 @@ class LocalModelRuntime:
             raise RuntimeError("The local model returned an empty answer")
         return answer, payload.get("usage", {})
 
-    def chat(self, question, context, max_tokens=240, comparison=False):
+    def _stream(self, messages, max_tokens, temperature, timeout, on_token, job):
+        connection = http.client.HTTPConnection('127.0.0.1', self.spec['port'], timeout=timeout)
+        chunks, usage = [], {}
+        def close_socket():
+            if connection.sock:
+                try:
+                    connection.sock.shutdown(socket.SHUT_RDWR)
+                except OSError:
+                    pass
+            connection.close()
+        try:
+            connection.connect()
+            if job:
+                job.attach(close_socket)
+            body = json.dumps({'model':self.spec['file'], 'messages':messages,
+                               'max_tokens':max_tokens, 'temperature':temperature, 'top_p':.9,
+                               'seed':42, 'stream':True, 'stream_options':{'include_usage':True}})
+            connection.request('POST', '/v1/chat/completions', body, {'Content-Type':'application/json'})
+            response = connection.getresponse()
+            if response.status != 200:
+                raise RuntimeError(response.read().decode()[:500])
+            while True:
+                if job:
+                    job.check()
+                line = response.readline()
+                if not line:
+                    break
+                if not line.startswith(b'data:'):
+                    continue
+                data = line[5:].strip()
+                if data == b'[DONE]':
+                    break
+                event = json.loads(data)
+                usage = event.get('usage') or usage
+                choices = event.get('choices') or []
+                token = choices[0].get('delta', {}).get('content') if choices else None
+                if token:
+                    chunks.append(token)
+                    if on_token and on_token(token) is False:
+                        break  # Closing this inference connection aborts llama.cpp decoding.
+            if job:
+                job.check()
+            return ''.join(chunks).strip(), usage
+        finally:
+            close_socket()
+            if job:
+                job.detach()
+
+    def chat(self, question, context, max_tokens=240, comparison=False, history=None,
+             on_token=None, job=None, temperature=.15):
         system = (
             "You are a grounded research assistant. Answer using ONLY the numbered sources supplied. "
             "Cite every factual sentence with source numbers such as [1]. If the sources do not "
@@ -131,13 +187,18 @@ class LocalModelRuntime:
         user = f"SOURCES:\n{context}\n\nQUESTION:\n{question}\n\nAnswer in at most 100 words. Put a valid source citation after every factual sentence."
         if self.model_id == "qwen3-4b":
             user += " /no_think"
-        answer, usage = self._complete([{"role": "system", "content": system},
-                                        {"role": "user", "content": user}], max_tokens=max_tokens)
+        messages = [{"role": "system", "content": system +
+                     ' Previous conversation is context for references, not verified evidence.'}]
+        messages.extend({'role':item['role'], 'content':str(item.get('content',''))[:1200]}
+                        for item in (history or [])[-4:] if item.get('role') in ('user','assistant'))
+        messages.append({'role':'user','content':user})
+        answer, usage = self._complete(messages, max_tokens=max_tokens, temperature=temperature,
+                                       on_token=on_token, job=job)
         answer = re.split(r"\n\s*(?:Sources?|References?)\s*:", answer, maxsplit=1,
                           flags=re.IGNORECASE)[0].strip()
         return answer, usage
 
-    def chat_general(self, question, history=None, max_tokens=120):
+    def chat_general(self, question, history=None, max_tokens=120, on_token=None, job=None):
         messages = [{"role": "system", "content": (
             "You are a concise and friendly local assistant. Respond naturally to greetings "
             "and casual conversation. Do not invent facts, claim that you searched, or add "
@@ -147,7 +208,8 @@ class LocalModelRuntime:
             if role in {"user", "assistant"} and content:
                 messages.append({"role": role, "content": content[:1200]})
         messages.append({"role": "user", "content": question + (" /no_think" if self.model_id == "qwen3-4b" else "")})
-        return self._complete(messages, max_tokens=max_tokens, temperature=0.35, timeout=120)
+        return self._complete(messages, max_tokens=max_tokens, temperature=0.35, timeout=120,
+                              on_token=on_token, job=job)
 
     def classify_intent(self, question):
         answer, _ = self._complete([{"role": "system", "content": (

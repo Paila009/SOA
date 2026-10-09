@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "dashboard"))
-from server import analyze_grounding, plan_search_queries, split_sentences  # noqa: E402
+from server import analyze_grounding, calibrated_probe_threshold, plan_search_queries, split_sentences  # noqa: E402
 
 
 class GroundingReviewTests(unittest.TestCase):
@@ -39,6 +39,7 @@ class GroundingReviewTests(unittest.TestCase):
         )
         self.assertEqual(result["unsupported_count"], 1)
         self.assertGreater(result["risk"], 0.5)
+        self.assertEqual(result["sentences"][1]["status"], "unverified")
         self.assertEqual(result["sentences"][1]["evidence_excerpt"], "")
 
     def test_unseen_date_does_not_get_strong_match(self):
@@ -51,11 +52,13 @@ class GroundingReviewTests(unittest.TestCase):
         negation = analyze_grounding(source[0]["snippet"], "Paris is not the capital of France.", sources=source)
         self.assertLessEqual(number["support"], 0.25)
         self.assertLessEqual(negation["support"], 0.25)
+        self.assertEqual(number["sentences"][0]["status"], "contradicted")
+        self.assertEqual(negation["sentences"][0]["status"], "contradicted")
 
     def test_wrong_citation_cannot_borrow_other_source(self):
         sources = self.sources + [{"title": "Paris", "snippet": "Paris is the capital of France."}]
         result = analyze_grounding("", "Kendrick Lamar is an American rapper [2].", sources=sources)
-        self.assertEqual(result["sentences"][0]["status"], "unsupported")
+        self.assertEqual(result["sentences"][0]["status"], "unverified")
 
     def test_standalone_source_marker_stays_with_claim(self):
         self.assertEqual(
@@ -82,6 +85,28 @@ class GroundingReviewTests(unittest.TestCase):
             ["Marie Curie", "Ada Lovelace"],
         )
         self.assertEqual(plan_search_queries("What is the capital of France?"), ["France"])
+
+    def test_validation_calibration_does_not_use_test_rows(self):
+        rows = [
+            {"split": "val", "label": 1, "probability": 0.8},
+            {"split": "val", "label": 0, "probability": 0.2},
+            {"split": "test", "label": 1, "probability": 0.01},
+        ]
+        calibration = calibrated_probe_threshold(rows)
+        self.assertEqual(calibration["samples"], 2)
+        self.assertEqual(calibration["split"], "validation")
+
+    def test_risk_and_coverage_are_reported_separately(self):
+        result = self.review("Kendrick Lamar is an American rapper. An unsupported moon claim exists.")
+        self.assertIn("evidence_coverage", result)
+        self.assertIn("weakest_claim_risk", result)
+        self.assertGreater(result["weakest_claim_risk"], 0.5)
+
+    def test_low_query_word_overlap_does_not_inflate_hallucination_risk(self):
+        result = analyze_grounding('Paris is the capital of France.',
+            'Paris is the capital of France.', question='Identify the administrative centre.')
+        self.assertEqual(result['question_relevance'], 0)
+        self.assertLess(result['risk'], .1)
 
 
 if __name__ == "__main__":

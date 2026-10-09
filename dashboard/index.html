@@ -7,7 +7,7 @@
   <meta name="description" content="Your local AI research studio. Explore questions, compare models, and inspect the evidence behind each answer.">
   <meta name="theme-color" content="#090c16">
   <link rel="icon" href="/grounded-mark.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/style.css?v=20260925-studio-3d">
+  <link rel="stylesheet" href="/style.css?v=20260926-analysis-drawer-fix">
 </head>
 <body>
   <svg class="icon-library" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
@@ -57,11 +57,12 @@
       </section>
 
       <section class="side-section detector-card">
-        <div class="section-line"><span>Research benchmark</span><span class="status-ready">OFFLINE TEST</span></div>
+        <div class="section-line"><span>Research benchmark</span><span id="benchmark-status" class="status-ready">LOADING</span></div>
         <strong>Full logistic probe</strong>
-        <div class="detector-stats"><span><b>0.715</b> AUROC</span><span><b>0.655</b> F1</span><span><b>331</b> signals</span></div>
-        <p class="field-help">Held-out results. Live chat uses text matching.</p>
+        <div class="detector-stats"><span><b id="benchmark-auroc">—</b> AUROC</span><span><b id="benchmark-f1">—</b> F1</span><span><b id="benchmark-signals">—</b> signals</span></div>
+        <p id="benchmark-note" class="field-help">Loading research provenance…</p>
         <button id="show-research" class="text-button">Explore the results <svg class="icon"><use href="#i-external"/></svg></button>
+        <button id="show-history" class="text-button">Experiment history <svg class="icon"><use href="#i-external"/></svg></button>
       </section>
       <div class="sidebar-foot"><span class="local-dot"></span>Local models. Your workspace.<span class="foot-symbol">G / 01</span></div>
     </aside>
@@ -69,8 +70,8 @@
     <main class="workspace surface">
       <header class="workspace-head">
         <div class="workspace-title"><span class="title-icon"><svg class="icon"><use href="#i-spark"/></svg></span><div><span class="crumb">RESEARCH STUDIO</span><h1>Grounded chat</h1></div></div>
-        <div class="head-status"><span id="runtime-status"><i></i>Connecting</span><button id="clear-chat" title="Clear conversation" aria-label="Clear conversation"><svg class="icon"><use href="#i-reset"/></svg></button></div>
-        <div class="mobile-actions"><button id="open-settings" type="button" aria-controls="settings-panel" aria-expanded="false"><svg class="icon"><use href="#i-sliders"/></svg><span>Models</span></button><button id="open-analysis" type="button" aria-controls="analysis-panel" aria-expanded="false"><svg class="icon"><use href="#i-shield"/></svg><span data-analysis-label>Analysis</span></button></div>
+        <div class="head-status"><span id="runtime-status"><i></i>Connecting</span><button id="compare-models" title="Compare installed models" aria-label="Compare installed models"><svg class="icon"><use href="#i-compare"/></svg></button><button id="clear-chat" title="Clear conversation" aria-label="Clear conversation"><svg class="icon"><use href="#i-reset"/></svg></button></div>
+        <div class="mobile-actions"><button id="mobile-compare-models" type="button"><svg class="icon"><use href="#i-compare"/></svg><span>Compare</span></button><button id="open-settings" type="button" aria-controls="settings-panel" aria-expanded="false"><svg class="icon"><use href="#i-sliders"/></svg><span>Models</span></button><button id="open-analysis" type="button" aria-controls="analysis-panel" aria-expanded="false"><svg class="icon"><use href="#i-shield"/></svg><span data-analysis-label>Analysis</span></button></div>
       </header>
       <div class="session-bar"><span class="model-tag"><span class="local-dot"></span><span id="active-model-name">Local model</span></span><span id="session-caption">New session</span></div>
 
@@ -93,6 +94,7 @@
         <div class="composer-card">
           <details id="context-panel">
             <summary><span><svg class="icon"><use href="#i-plus"/></svg>Add your evidence <em>optional</em></span><small id="context-count">0 characters</small></summary>
+            <label class="document-picker">Open local PDF / text<input id="document-input" type="file" accept=".pdf,.txt,.md"><span id="document-status">Nothing selected</span></label>
             <textarea id="context-input" aria-label="Private evidence" placeholder="Paste the notes or passages you want the model to use…"></textarea>
           </details>
           <div class="composer">
@@ -106,15 +108,15 @@
     </main>
 
     <aside class="inspector surface" id="analysis-panel" aria-label="Answer evidence and metrics">
-      <header><div><span class="crumb">THE EVIDENCE LAYER</span><h2>Answer insights<span class="heading-dot">.</span></h2></div><span id="analysis-state" class="analysis-state idle">IDLE</span><button id="close-analysis" class="drawer-close" type="button" aria-label="Close analysis">×</button></header>
+      <header><div><span class="crumb">THE EVIDENCE LAYER</span><h2>Answer insights<span class="heading-dot">.</span></h2><small id="analysis-selection">No answer selected</small></div><span id="analysis-state" class="analysis-state idle">IDLE</span><button id="close-analysis" class="drawer-close" type="button" aria-label="Close analysis">×</button></header>
       <section class="risk-card">
-        <div class="risk-ring" id="risk-ring"><div><strong id="risk-value">—</strong><span>MATCH RISK</span></div></div>
+        <div class="risk-ring" id="risk-ring"><div><strong id="risk-value">—</strong><span>WEAKEST CLAIM</span></div></div>
         <div><h3 id="risk-title">Ready to explore</h3><p id="risk-description">Ask a question to see how the answer connects to its evidence.</p></div>
       </section>
       <section class="metric-grid" aria-label="Answer metrics">
-        <article><span>Evidence match</span><strong id="support-value">—</strong><small>source text overlap</small></article>
+        <article><span>Evidence coverage</span><strong id="support-value">—</strong><small>weighted claim support</small></article>
         <article><span>Response time</span><strong id="latency-value">—</strong><small>retrieval + generation</small></article>
-        <article><span>Unmatched claims</span><strong id="unsupported-value">—</strong><small>sentences to review</small></article>
+        <article><span>Claims to review</span><strong id="unsupported-value">—</strong><small>contradicted + unverified</small></article>
         <article><span>Guard action</span><strong id="action-value">—</strong><small>evidence decision</small></article>
       </section>
       <div class="review-stack">
@@ -128,11 +130,30 @@
   <dialog id="research-dialog" aria-labelledby="research-title">
     <form method="dialog"><button class="dialog-close" aria-label="Close research results">×</button></form>
     <span class="crumb">BEHIND THE RESEARCH</span><h2 id="research-title">Measured, not assumed.</h2>
-    <p>Probe results on the same 115 held-out examples, with dimensionality reduction fitted on training data.</p>
+    <p id="research-provenance">Loading the active experiment and its label provenance…</p>
     <div id="research-cards" class="research-cards"></div>
+    <div id="probe-live-status" class="research-note"></div>
+    <div class="demo-prompts"><button type="button" data-demo="supported">Supported demo</button><button type="button" data-demo="contradicted">Contradiction demo</button><button type="button" data-demo="fabricated">Fabrication demo</button></div>
     <div class="research-note">These offline results do not establish live-chat accuracy, causal validity, cross-model transfer, or steering effectiveness. Those experiments remain separate.</div>
   </dialog>
-  <script src="/app.js?v=20260925-studio-3d"></script>
-  <script src="/scene.js?v=20260925-studio-3d" defer></script>
+  <dialog id="compare-dialog" aria-labelledby="compare-title">
+    <form method="dialog"><button class="dialog-close" aria-label="Close model comparison">×</button></form>
+    <span class="crumb">CONTROLLED MODEL LAB</span><h2 id="compare-title">Compare the same question.</h2>
+    <p>Each selected local model receives the same question, retrieved evidence, review threshold, and generation budget.</p>
+    <label class="compare-question-label" for="compare-question">Question</label>
+    <textarea id="compare-question" rows="2" placeholder="Enter a factual question to compare…"></textarea>
+    <div id="compare-model-options" class="compare-options"></div>
+    <div class="compare-actions"><button id="run-comparison" type="button">Run comparison</button><button id="cancel-comparison" type="button" hidden>Cancel</button><span id="compare-status">Choose at least two installed models.</span></div>
+    <div id="compare-results" class="compare-results"></div>
+  </dialog>
+  <dialog id="history-dialog" aria-labelledby="history-title">
+    <form method="dialog"><button class="dialog-close" aria-label="Close experiment history">×</button></form>
+    <span class="crumb">PRIVATE LOCAL LEDGER</span><h2 id="history-title">Experiment history.</h2>
+    <p>New runs store the full question, answer, reviewed passages, scores, and timings locally so their analysis can be reopened. Nothing is uploaded by this history feature. Older summary-only entries cannot reconstruct their full review.</p>
+    <div class="history-toolbar"><select id="history-model-filter"><option value="">All models</option></select><select id="history-status-filter"><option value="">All decisions</option></select><button id="export-history-json" type="button">Export JSON</button><button id="export-history-csv" type="button">Export CSV</button></div>
+    <div id="history-list" class="history-list"></div>
+  </dialog>
+  <script src="/app.js?v=20260926-analysis-drawer-fix"></script>
+  <script src="/scene.js?v=20260926-analysis-drawer-fix" defer></script>
 </body>
 </html>

@@ -54,7 +54,18 @@ Thumbs.db
 
 # Secrets
 .env
+.env.*
+!.env.example
+.venv-customer/
+*service-account*.json
+*serviceAccount*.json
+*firebase-adminsdk*.json
+*.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm
 *.key
 .runtime/
 __pycache__/
 *.pyc
+.pytest_cache/
+.codex-test-tmp/
