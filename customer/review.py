@@ -4,12 +4,31 @@ import re
 from collections import Counter
 
 
+def is_nonfactual(text):
+    """Only complete greetings, thanks, or interrogative sentences bypass sourcing."""
+    value = text.strip()
+    return bool(
+        re.fullmatch(r"(?:hi|hello|hey|greetings|good morning|good afternoon|good evening|thanks|thank you|"
+                     r"you(?:'|’)re welcome|happy to help)[.!]*", value, re.I)
+        or re.fullmatch(r"(?:what|why|where|when|who|which|how|can|could|would|will|do|does|did|"
+                        r"is|are|was|were|have|has|should|may)\b[^.!?]*\?", value, re.I)
+    )
+
+
+def unsourced_claim(index, text):
+    nonfactual = is_nonfactual(text)
+    return {"id": index, "text": text, "status": "not_factual" if nonfactual else "unverified",
+            "source": None, "quote": "",
+            "reason": "Conversational greeting or question; no factual assertion to source-check." if nonfactual
+            else "No source passage was available for review."}
+
+
 def split_claims(text):
     cleaned = re.sub(r"(?m)^\s*(?:[-*•]|\d+\.)\s+", "", text)
     claims = []
     for chunk in re.split(r"(?<=[.!?])\s+(?!\[\d+\])|\n+", cleaned):
         chunk = chunk.strip().strip("# ")
-        if len(re.findall(r"\w+", chunk)) < 2:
+        if len(re.findall(r"\w+", chunk)) < 2 and not is_nonfactual(chunk):
             continue
         claims.append(chunk[:1600])
     return claims[:24]
@@ -60,13 +79,14 @@ def review_local_answer(answer, sources):
     """Conservative offline review for local answers; no second model call is required."""
     claims = split_claims(answer)
     if not sources or not claims:
-        items = [{"id": i, "text": text, "status": "unverified", "source": None,
-                  "quote": "", "reason": "No source passage was available for review."}
-                 for i, text in enumerate(claims, 1)]
+        items = [unsourced_claim(i, text) for i, text in enumerate(claims, 1)]
     else:
         from dashboard.claim_verifier import verify_claim
         items = []
         for index, claim in enumerate(claims, 1):
+            if is_nonfactual(claim):
+                items.append(unsourced_claim(index, claim))
+                continue
             result = verify_claim(claim, sources, use_nli=False)
             status = result.get("status", "unverified")
             if status == "partial":
@@ -87,8 +107,8 @@ def review_local_answer(answer, sources):
 def review_answer(api, model, answer, sources, job):
     claims = split_claims(answer)
     if not sources or not claims:
-        items = [{"id": i, "text": text, "status": "unverified", "source": None, "quote": "", "reason": "No source passage was available for review."} for i, text in enumerate(claims, 1)]
-        return summarize(items, "No source evidence; this is unverified, not proof of hallucination.")
+        items = [unsourced_claim(i, text) for i, text in enumerate(claims, 1)]
+        return summarize(items, "Conversation needs no source evidence. Factual claims without passages remain unverified.")
     prompt = {"claims": [{"id": i, "text": text} for i, text in enumerate(claims, 1)],
               "sources": [{"id": s["id"], "passage": s["snippet"]} for s in sources]}
     messages = [{"role": "system", "content":

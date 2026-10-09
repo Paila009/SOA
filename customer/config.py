@@ -39,6 +39,7 @@ class Settings:
     origin: str = "http://127.0.0.1:8770"
     database: Path = ROOT / "outputs/customer/workspace.sqlite3"
     firebase: dict = field(default_factory=dict)
+    firebase_check_revoked: bool = False
     models: dict = field(default_factory=dict)
     keys: dict = field(default_factory=dict, repr=False)
     review_model: str = ""
@@ -149,6 +150,7 @@ def load_settings():
                     origin=os.getenv("PUBLIC_ORIGIN", "http://127.0.0.1:8770").rstrip("/"),
                     database=db if db.is_absolute() else ROOT / db,
                     firebase=firebase, models=models, keys=keys,
+                    firebase_check_revoked=os.getenv("FIREBASE_CHECK_REVOKED", "false").strip().lower() == "true",
                     local_models_enabled=os.getenv("ENABLE_LOCAL_MODELS", "true").strip().lower() == "true",
                     groq_free_plan_confirmed=os.getenv("GROQ_FREE_PLAN_CONFIRMED", "false").strip().lower() == "true",
                     gemini_free_tier_confirmed=os.getenv("GEMINI_FREE_TIER_CONFIRMED", "false").strip().lower() == "true",

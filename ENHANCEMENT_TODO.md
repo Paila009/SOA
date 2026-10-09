@@ -8,6 +8,23 @@ after tests pass.
 
 The customer entry point now serves installed local models and optional API models in one viewer; the older research dashboard is preserved only for specialist experiment controls.
 
+### Usable public workspace and session repair — 2026-10-09
+
+- [x] Verify Firebase token signatures, audience, issuer, subject, and timestamps against Google's signed public certificates without requiring an Admin credential for ordinary login.
+- [x] Distinguish invalid/expired sessions from temporary certificate-service failures; preserve the workspace and expose a retry/sign-in recovery path.
+- [x] Keep credential-backed revocation/disabled-user checks optional behind `FIREBASE_CHECK_REVOKED=true`; do not claim revocation checking when it is disabled.
+- [x] Add authenticated per-account API connect/catalog/disconnect endpoints to localhost. Validate exact chat model IDs using read-only provider catalog endpoints; retain personal keys only in server memory.
+- [x] Scope provider clients, quota cooldowns, and captured job credentials to the user's connection without mutating the owner's settings or storing keys in saved answers.
+- [x] Return account-specific model configuration with the workspace; redact credential inputs and raw upstream errors.
+- [x] Expose explicit source, claim-verdict, reasoning, and saved-answer analysis controls in the customer interface.
+- [ ] Publish the actual customer interface in GitHub Pages browser mode with Firebase login, personal API connections, evidence review, and per-account IndexedDB history. Publication is verified separately after deployment.
+- [x] Verify Firebase project configuration lists `paila009.github.io` after the owner authorized the domain. Interactive public Google sign-in still needs a user acceptance check; browser automation was unavailable in this environment.
+- [ ] Verify a real user-supplied API key through streamed generation, evidence review, and Stop. No provider key has been supplied; mocked provider tests do not establish live access or free billing.
+
+The public browser workspace uses each user's own in-memory key directly with the provider and clears it on refresh/sign-out. It cannot expose shared-owner server keys or execute downloaded GGUF weights. Official download links are supplied; local execution needs a runtime/local app. A shared-key hosted service still needs a Python backend. Free-plan confirmations are acknowledgements rather than billing guarantees.
+
+Integrated verification: 104 Python tests and 25 JavaScript frontend/runtime tests passed, including actual Pages asset construction, signed-token rejection, account isolation, current catalog/key checks, key redaction, streaming, timeouts/Stop, harmless greetings in reviewed-only mode, and selecting historical answer reviews. Real installed Qwen2.5 answered “What is cricket?” with the supplied passage in 0.91 seconds and its review linked that exact passage. Live Wikipedia retrieval returned sources. Browser CORS preflight checks succeeded for all three API providers. Provider generation tests use mocked responses because no real personal key was supplied. Windows visual/browser automation failed to start, so no visual or real OAuth acceptance claim is made.
+
 ### Free-tier live chat — 2026-10-09
 
 - [x] Gate Groq, Gemini, and OpenRouter behind explicit free-only owner confirmations; require OpenRouter model IDs to end in `:free` and provide no automatic paid fallback.
@@ -24,7 +41,7 @@ The customer entry point now serves installed local models and optional API mode
 - [x] Reuse cancellable llama.cpp runtimes in the customer pipeline, bound local context for 4K models, and attach a conservative local evidence review without a second API call.
 - [x] Fix the older local-model NLI regression: passages rejected as unverified no longer retain a source link or unrelated excerpt. `test_invented_claim_cannot_borrow_words_from_other_claim` now passes with the optional NLI runtime enabled.
 
-Verification: customer backend 33/33 tests and frontend 9/9 tests pass; Python compilation and JavaScript syntax checks pass. The authenticated service responds on `localhost:8770`, publishes all three installed models in the main selector, and a real Qwen inference returned `LOCAL MODEL READY`. Completed answers expose explicit verdict-reason and searched-source actions. No API-provider key/model is present, so no API call or billing claim has been made. A GitHub Pages workflow publishes only the static showcase; it does not host the authenticated backend.
+Earlier verification: customer backend 33/33 tests and frontend 9/9 tests passed; Python compilation and JavaScript syntax checks passed. The authenticated service responded on `localhost:8770`, published all three installed models in the main selector, and a real Qwen inference returned `LOCAL MODEL READY`. Completed answers exposed explicit verdict-reason and searched-source actions. No API-provider key/model was present. The earlier Pages deployment was a showcase; the current follow-up replaces it with the customer interface in browser mode, while Python/server-local execution remains separate.
 
 ### Customer-facing cleanup
 
@@ -48,11 +65,11 @@ Cleanup checks: all 54 Python regression tests and five new frontend behavior te
 - [x] Add account-isolation, persistence, streaming-parser, cancellation, review-validation, upload, and security regression tests.
 - [x] Verify saved review/source access after refresh in the browser and confirm composer/review bounds at laptop and phone viewport sizes.
 - [ ] Connect the owner's chosen API provider and run a real generation + review + cancellation smoke test. No credential was supplied in this turn.
-- [ ] Connect the owner's Firebase project and Admin credential; test real sign-up, email verification, login, reset, logout, and two-account isolation.
+- [ ] Test real sign-up, email verification, login, reset, logout, and two-account isolation after the token-verification repair. An Admin credential is required only for the optional revocation checks, not ordinary signed-token verification.
 - [ ] Before accepting public customers: configure HTTPS hosting, persistent storage/backups, provider budget alerts, deployment-level rate limiting, retention/privacy policy, and abuse/load testing.
 - [ ] Independently evaluate the new API reviewer; expand academic retrieval and PDF ingestion only with appropriate source access and safe parsing. Current retrieval is Wikipedia introductory passages + selected text-document excerpts.
 
-See `docs/CUSTOMER_SETUP.md` for activation and deployment boundaries. GitHub Pages publishes the static showcase only; public authenticated chat still requires a separately hosted Python backend.
+See `docs/CUSTOMER_SETUP.md` for activation and deployment boundaries. GitHub Pages runs the browser customer workspace using personal provider keys; shared-owner API keys, SQLite histories, and server-local llama.cpp execution require the separately hosted Python backend.
 
 Verification on 2026-10-08: 54 available regression tests passed (18 customer tests + 36 existing tests), Python compilation and both frontend JavaScript syntax checks passed. Customer `/api/health` returned `ok` on port 8770. Real API/Firebase acceptance tests remain unchecked above. One upstream Starlette/httpx test-client deprecation warning was emitted; it did not affect the tests.
 

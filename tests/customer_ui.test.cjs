@@ -9,7 +9,7 @@ const root = path.resolve(__dirname, '..');
 const source = fs.readFileSync(path.join(root, 'customer/web/app.js'), 'utf8').replace(/\binit\(\);\s*$/, '');
 const html = fs.readFileSync(path.join(root, 'customer/web/index.html'), 'utf8');
 
-function harness() {
+function harness(extra={}) {
   const elements = new Map(), stored = new Map();
   function element(id) {
     if (!elements.has(id)) elements.set(id, {
@@ -24,7 +24,7 @@ function harness() {
   const context = vm.createContext({
     document:{getElementById:element},
     localStorage:{getItem:key=>stored.get(key)??null,setItem:(key,value)=>stored.set(key,value)},
-    URL, setTimeout, clearTimeout, capture:null,
+    URL, setTimeout, clearTimeout, capture:null,...extra,
   });
   vm.runInContext(source,context);
   vm.runInContext(`closeSidebar=()=>{}; openModal=(title,content,eyebrow,variant)=>{capture={title,content,eyebrow,variant};}; state.config={preview:true,models:[]};`,context);
@@ -79,9 +79,9 @@ test('preferences cannot alter an in-flight answer',()=>{
 });
 
 test('customer chrome and sign-in errors do not send users to infrastructure setup',()=>{
-  assert.doesNotMatch(html,/Firebase|\.env|Setup guide|Connect your models|Connect a model|Connections &amp; settings|Connections & settings/);
+  assert.doesNotMatch(html,/Firebase|\.env|Setup guide|Connections &amp; settings|Connections & settings/);
   assert.match(html,/Preferences/);
-  assert.match(html,/Live chat isn’t available yet/);
+  assert.match(html,/Connect a model to start chatting/);
   const h=harness();
   for(const code of ['auth/unauthorized-domain','auth/operation-not-allowed','auth/configuration-not-found','auth/popup-blocked','unexpected']){
     const message=h.run(`authError({code:${JSON.stringify(code)}})`);
@@ -127,4 +127,44 @@ test('evidence drawer names the three customer-facing review views',()=>{
   assert.match(html,/Grounded check/);
   assert.match(html,/Searched sources/);
   assert.match(html,/How it was checked/);
+});
+
+test('saved answer selection restores its own visible sources and analysis',()=>{
+  const h=harness();
+  h.run(`state.chat={id:'chat',title:'Research',messages:[{id:'old',role:'assistant',content:'Old answer',created:1,detail:{question:'Earlier question',sources:[{id:1,title:'Earlier source',snippet:'Earlier passage'}],review:{coverage:50,counts:{supported:1,unverified:1},claims:[{id:1,text:'Old claim',status:'supported',source:1,quote:'Earlier passage',reason:'Quoted support'}]}}},{id:'new',role:'assistant',content:'New answer',created:2,detail:{question:'New question',sources:[],review:{counts:{unverified:2},claims:[]}}}]};renderChat();selectAnswerAnalysis('old')`);
+  const panel=h.element('answer-insights');
+  assert.equal(panel.hidden,false);
+  assert.match(panel.innerHTML,/Earlier question/);
+  assert.match(panel.innerHTML,/Earlier source/);
+  assert.match(panel.innerHTML,/Earlier passage/);
+  assert.match(panel.innerHTML,/50%/);
+  assert.doesNotMatch(panel.innerHTML,/New question/);
+  assert.match(panel.innerHTML,/not a hallucination probability/);
+});
+
+test('model library offers actual personal key connection controls',()=>{
+  const h=harness();h.run(`state.config={preview:false,models:[],localModels:[],providers:[]};showModels()`);
+  assert.match(h.context.capture.content,/id="provider-key" type="password"/);
+  assert.match(h.context.capture.content,/id="load-provider-models"/);
+  assert.match(h.context.capture.content,/id="connect-provider"/);
+  assert.match(h.context.capture.content,/Groq/);
+  assert.match(h.context.capture.content,/Google Gemini/);
+  assert.match(h.context.capture.content,/OpenRouter/);
+});
+
+test('Pages frontend initializes the runtime object and uses its protected API',async()=>{
+  const {createRuntime}=require('../customer/web/browser-runtime.js');
+  const records=new Map();
+  const runtime=createRuntime({store:{get:async id=>records.get(id),set:async(id,value)=>records.set(id,value),delete:async id=>records.delete(id)}});
+  const h=harness({GROUNDED_DEPLOYMENT:{mode:'browser',firebase:{projectId:'project',apiKey:'public-client-key'}},GroundedBrowserRuntime:runtime});
+  const config=await h.run("api('/api/config')");
+  assert.equal(config.firebase.projectId,'project');
+  assert.equal(config.browser,true);
+  await assert.rejects(h.run("api('/api/workspace')"),/verified Firebase/);
+  h.run("state.user={uid:'alice',emailVerified:true}");
+  const sample=await h.run("api('/api/sample',{method:'POST'})");
+  assert.ok(sample.messages[1].detail.sources.length);
+  const workspace=await h.run("api('/api/workspace')");
+  assert.equal(workspace.chats.length,1);
+  assert.equal(workspace.config.browser,true);
 });

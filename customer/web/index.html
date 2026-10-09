@@ -4,13 +4,13 @@
   <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
   <meta name="theme-color" content="#173f32"><meta name="description" content="Grounded — a research workspace for thoughtful answers, inspectable sources, and transparent evidence reviews.">
   <title>Grounded — A little more certain.</title>
-  <link rel="icon" type="image/svg+xml" href="/assets/logo.svg"><link rel="stylesheet" href="/assets/style.css">
+  <link rel="icon" type="image/svg+xml" href="./assets/logo.svg"><link rel="stylesheet" href="./assets/style.css">
 </head>
 <body>
-  <div id="boot" class="boot"><img src="/assets/logo.svg" alt="" width="48" height="48"><p>Opening your workspace…</p></div>
+  <div id="boot" class="boot"><img src="./assets/logo.svg" alt="" width="48" height="48"><p>Opening your workspace…</p></div>
   <section id="auth-page" class="auth-page" hidden>
     <div class="auth-story">
-      <a class="brand" href="/"><img src="/assets/logo.svg" alt="" width="40" height="40"><span>grounded<span class="brand-dot">.</span></span></a>
+      <a class="brand" href="./"><img src="./assets/logo.svg" alt="" width="40" height="40"><span>grounded<span class="brand-dot">.</span></span></a>
       <div class="auth-pitch"><span class="eyebrow">A LITTLE MORE CERTAIN</span><h1>Big questions.<br>Better foundations.</h1><p>A thoughtful space to explore ideas, follow the evidence, and see what an answer is really built on.</p>
         <div class="story-card"><div class="story-top"><span class="tiny-dot"></span> THE EVIDENCE BEHIND THE ANSWER</div><p>Curiosity is the starting point.<br>Evidence is what comes next.</p><div class="story-proof"><span>↗ Inspectable sources</span><span>✓ Claim-by-claim review</span></div></div>
       </div>
@@ -35,7 +35,7 @@
   <div id="workspace" class="workspace" hidden>
     <button id="sidebar-shade" class="sidebar-shade" aria-label="Close navigation" hidden></button>
     <aside id="sidebar" class="sidebar" aria-label="Main navigation">
-      <a class="brand" href="/"><img src="/assets/logo.svg" alt="" width="38" height="38"><span>grounded<span class="brand-dot">.</span></span></a>
+      <a class="brand" href="./"><img src="./assets/logo.svg" alt="" width="38" height="38"><span>grounded<span class="brand-dot">.</span></span></a>
       <div class="workspace-label"><span class="tiny-dot"></span> YOUR RESEARCH SPACE</div>
       <button id="new-chat" class="new-chat"><span data-icon="plus"></span> New research <kbd>N</kbd></button>
       <nav class="main-nav"><button id="home-button" class="nav-item active"><span data-icon="grid"></span> Workspace <span class="nav-dot"></span></button><button id="models-button" class="nav-item"><span data-icon="layers"></span> Models <span id="model-count" class="count">0</span></button><button id="library-button" class="nav-item"><span data-icon="book"></span> My documents <span id="document-count" class="count">0</span></button></nav>
@@ -52,7 +52,7 @@
       <div id="content-scroll" class="content-scroll">
         <section id="welcome" class="welcome">
           <div class="welcome-kicker"><span class="spark-small">✧</span> LESS GUESSWORK. MORE UNDERSTANDING.</div>
-          <div class="hero"><div class="hero-copy"><h1>Follow your curiosity.<br><em>Find your footing.</em></h1><p>Explore a question. Trace the sources.<br>See what stands up to a closer look.</p></div><div class="evidence-art" aria-hidden="true"><div class="orbit orbit-one"></div><div class="orbit orbit-two"></div><div class="art-center"><img src="/assets/logo.svg" alt=""></div><div class="floating-card art-source"><span>↗</span><div>Source found<small>Follow the evidence</small></div></div><div class="floating-card art-verified"><span>✓</span><div>Claim reviewed<small>A clearer picture</small></div></div><div class="art-spark">✧</div><div class="art-dot"></div></div></div>
+          <div class="hero"><div class="hero-copy"><h1>Follow your curiosity.<br><em>Find your footing.</em></h1><p>Explore a question. Trace the sources.<br>See what stands up to a closer look.</p></div><div class="evidence-art" aria-hidden="true"><div class="orbit orbit-one"></div><div class="orbit orbit-two"></div><div class="art-center"><img src="./assets/logo.svg" alt=""></div><div class="floating-card art-source"><span>↗</span><div>Source found<small>Follow the evidence</small></div></div><div class="floating-card art-verified"><span>✓</span><div>Claim reviewed<small>A clearer picture</small></div></div><div class="art-spark">✧</div><div class="art-dot"></div></div></div>
           <div class="starter-heading"><h2>A starting point for your next idea</h2><span>Make it your own ↙</span></div>
           <div class="starter-grid">
             <button class="starter" data-prompt="Explain retrieval-augmented generation and where its answers can still go wrong." data-mode="research"><span class="starter-icon" data-icon="compass"></span><h3>Understand something</h3><p>Break down a topic, with sources you can follow.</p><span class="starter-arrow">↗</span></button>
@@ -62,8 +62,9 @@
           <div class="welcome-note"><span data-icon="shield"></span><p><strong>Confidence comes from context.</strong> Every review shows its evidence. An unverified claim isn’t automatically a false one.</p><button id="welcome-sample" class="text-button">See an example <span>↗</span></button></div>
         </section>
         <section id="chat" class="chat" aria-label="Conversation" hidden></section>
+        <aside id="answer-insights" class="answer-insights" aria-label="Selected answer analysis" hidden></aside>
       </div>
-      <footer class="composer-wrap"><div id="chat-availability" class="chat-availability" role="status" hidden><span class="availability-icon" data-icon="spark"></span><div><strong>Live chat isn’t available yet.</strong><p>Your question is still here. Explore a sample answer in the meantime.</p><button id="availability-sample" class="text-button" type="button">Explore a sample <span>↗</span></button></div><button id="dismiss-availability" class="icon-button" type="button" aria-label="Dismiss chat availability message"><span data-icon="close"></span></button></div><div id="attached-docs" class="attached-docs"></div>
+      <footer class="composer-wrap"><div id="chat-availability" class="chat-availability" role="status" hidden><span class="availability-icon" data-icon="spark"></span><div><strong>Connect a model to start chatting.</strong><p>Your question is still here. Choose an API connection or an installed local model.</p><button id="availability-connect" class="text-button" type="button">Connect a model <span>↗</span></button><button id="availability-sample" class="text-button" type="button">Explore a sample <span>↗</span></button></div><button id="dismiss-availability" class="icon-button" type="button" aria-label="Dismiss chat availability message"><span data-icon="close"></span></button></div><div id="attached-docs" class="attached-docs"></div>
         <form id="composer" class="composer"><textarea id="question" rows="2" maxlength="6000" placeholder="What would you like to understand?" aria-label="Your research question"></textarea>
           <div class="composer-controls"><div class="composer-left"><button type="button" id="attach-button" class="icon-button" title="Use a document" aria-label="Use a document"><span data-icon="plus"></span></button><div class="control-divider"></div><label class="select-shell"><span data-icon="compass"></span><select id="mode" aria-label="Research mode"><option value="research">Research</option><option value="compare">Compare</option><option value="write">Write</option></select></label><button id="search-toggle" type="button" class="search-toggle selected" aria-pressed="true" title="Retrieve Wikipedia passages"><span data-icon="globe"></span><span>Sources on</span></button></div><div class="composer-right"><label class="model-select-shell"><select id="model" aria-label="Answer model" disabled><option value="">Chat unavailable</option></select></label><button id="send-button" class="send-button" type="submit" aria-label="Send question"><span data-icon="arrow"></span></button><button id="stop-button" class="stop-button" type="button" hidden><span class="stop-square"></span> Stop</button></div></div>
         </form><div class="composer-caption"><span><span class="tiny-dot"></span> <span id="composer-status">Thoughtful answers. Transparent evidence.</span></span><span class="enter-hint">Enter to send <kbd>↵</kbd></span></div>
@@ -74,5 +75,5 @@
   <dialog id="review-dialog" class="review-dialog" aria-labelledby="review-title"><header class="review-header"><div><span class="eyebrow">BEHIND THIS ANSWER</span><h2 id="review-title">Sources &amp; grounded check.</h2></div><button id="close-review" class="icon-button" aria-label="Close answer review"><span data-icon="close"></span></button></header><p id="review-question" class="review-question"></p><div id="review-tabs" class="review-tabs" role="tablist" aria-label="Answer details"><button data-tab="claims" role="tab" aria-selected="true">Grounded check</button><button data-tab="sources" role="tab" aria-selected="false">Searched sources</button><button data-tab="draft" role="tab" aria-selected="false">How it was checked</button></div><div id="review-content" class="review-content" role="tabpanel"></div><footer class="review-footer"><span data-icon="info"></span> Evidence review is a useful signal, not a guarantee of truth.</footer></dialog>
   <dialog id="modal" class="modal" aria-labelledby="modal-title"><div class="modal-top"><span id="modal-eyebrow" class="eyebrow">YOUR WORKSPACE</span><button id="close-modal" class="icon-button" aria-label="Close dialog"><span data-icon="close"></span></button></div><h2 id="modal-title"></h2><div id="modal-content"></div></dialog>
   <div id="toast" class="toast" role="status" hidden></div>
-  <script type="module" src="/assets/app.js"></script>
+  <script type="module" src="./assets/app.js"></script>
 </body></html>

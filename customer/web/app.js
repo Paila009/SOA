@@ -32,7 +32,9 @@ const safeLink = (url) => {
     return u.protocol === 'https:' || loopback ? esc(u.href) : '';
   } catch { return ''; }
 };
-const state = { config:null, user:null, auth:null, firebase:null, chats:[], documents:[], selectedDocs:new Set(), chat:null, job:null, search:true, strict:false, mode:'research', model:'', review:null, reviewTab:'claims', signup:false, creatingAccount:false, epoch:0 };
+const state = { config:null, user:null, auth:null, firebase:null, chats:[], documents:[], selectedDocs:new Set(), chat:null, job:null, search:true, strict:false, mode:'research', model:'', review:null, reviewTab:'claims', signup:false, creatingAccount:false, epoch:0, analysisMessageId:null, sessionError:null };
+const browserDeployment = globalThis.GROUNDED_DEPLOYMENT?.mode === 'browser';
+let browserRuntime;
 let toastTimer;
 function toast(message) { $('toast').textContent=message; $('toast').hidden=false; clearTimeout(toastTimer); toastTimer=setTimeout(() => { $('toast').hidden=true; },5500); }
 const timeLabel = (date) => new Date(date * 1000).toLocaleString(undefined,{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
@@ -40,6 +42,10 @@ const storage = { get(key) { try { return localStorage.getItem(key); } catch { r
 function lastChatKey() { return `grounded:customer:last:${state.user?.uid || 'preview'}`; }
 
 async function api(path, options={}, allowRefresh=true) {
+  if(browserDeployment) {
+    if(!browserRuntime){browserRuntime=globalThis.GroundedBrowserRuntime;browserRuntime.initialize({firebase:globalThis.GROUNDED_DEPLOYMENT.firebase});}
+    return browserRuntime.request(path,options,state.user);
+  }
   const request={...options};
   const headers = new Headers(request.headers || {});
   if (state.user) headers.set('Authorization',`Bearer ${await state.user.getIdToken()}`);
@@ -63,7 +69,8 @@ async function api(path, options={}, allowRefresh=true) {
   if (!response.ok) {
     let detail;
     try { detail=(await response.json()).detail; } catch { detail='The server could not be reached. Please try again.'; }
-    throw new Error(typeof detail==='string' ? detail : 'Please check the information you entered.');
+    const error=new Error(typeof detail==='string' ? detail : 'Please check the information you entered.');
+    error.status=response.status;throw error;
   }
   return request.asBlob ? response.blob() : response.json();
 }
@@ -83,8 +90,20 @@ async function refreshWorkspace() {
   const result=await api('/api/workspace');
   if (epoch!==state.epoch) return;
   state.chats=result.chats; state.documents=result.documents;
+  if(result.config){state.config={...state.config,...result.config};renderModels();}
   state.selectedDocs=new Set([...state.selectedDocs].filter(id => state.documents.some(d => d.id===id)));
   renderHistory(); renderAttached(); $('document-count').textContent=state.documents.length;
+}
+
+function renderModels() {
+  const models=state.config.models || [], saved=state.model || storage.get('grounded:model');
+  $('model-count').textContent=models.filter(m=>m.provider!=='local').length+(state.config.localModels?.length || 0);
+  $('model').innerHTML=models.length?models.map(m=>`<option value="${esc(m.id)}">${esc(m.model)} · ${esc(m.providerName)}</option>`).join(''):'<option value="">Connect a model in Models</option>';
+  if(models.some(m=>m.id===saved))$('model').value=saved;
+  state.model=$('model').value;
+  $('model').disabled=!!state.job || state.config.preview || !models.length;
+  $('connection-label').textContent=state.sessionError?'Workspace unavailable':state.config.preview?'Preview':models.length?'Ready to research':'Connect a model';
+  $('workspace-status').title=state.sessionError || (models.length?'Choose a model and ask a question':'Open Models to connect your own API key');
 }
 
 function renderHistory() {
@@ -116,21 +135,58 @@ function richText(text,messageId) {
   flush(); return html;
 }
 
+function renderInsights(message=null) {
+  const panel=$('answer-insights'), scroll=$('content-scroll');
+  if(!panel || !scroll)return;
+  const answers=(state.chat?.messages || []).filter(m=>m.role==='assistant');
+  const selected=message || answers.find(m=>m.id===state.analysisMessageId) || answers[answers.length-1];
+  panel.hidden=!selected;
+  scroll.classList.toggle('has-insights',!!selected);
+  if(!selected){panel.innerHTML='';state.analysisMessageId=null;return;}
+  state.analysisMessageId=selected.id;
+  const d=selected.detail || {}, review=d.review || {}, counts=review.counts || {}, sources=d.sources || [], claims=review.claims || [];
+  const supported=counts.supported || 0, contradicted=counts.contradicted || 0, unverified=counts.unverified || 0, inspect=contradicted+unverified;
+  const coverage=Number.isFinite(review.coverage)?Math.max(0,Math.min(100,review.coverage)):null;
+  const conversational=claims.length>0&&supported+contradicted+unverified===0;
+  const verdict=d.cancelled?'Stopped':d.error?'Review incomplete':!claims.length?'Not reviewed':conversational?'Conversational':contradicted?'Conflicting evidence':!sources.length&&supported===0?'No evidence':unverified?'Needs evidence':'Evidence matched';
+  const tone=d.cancelled||d.error||contradicted?'conflict':unverified||!claims.length||(!conversational&&!sources.length&&supported===0)?'attention':'matched';
+  const guard=d.cancelled?'Generation stopped':d.error?'Review did not finish':d.strict?(inspect?'Weak claims filtered':'Reviewed answer'):'Full answer + review';
+  const risk=conversational?'No factual claims needed source verification in this answer.':contradicted?`${contradicted} claim${contradicted===1?'':'s'} conflict with the reviewed passages.`:unverified?`${unverified} claim${unverified===1?' lacks':'s lack'} cited support in this review.`:claims.length?'No conflicting or unverified claims were reported by this review.':'This answer has no completed claim review yet.';
+  const claimOrder={contradicted:0,unverified:1,supported:2,not_factual:3};
+  const visibleClaims=[...claims].sort((a,b)=>(claimOrder[a.status]??4)-(claimOrder[b.status]??4)).slice(0,3);
+  panel.innerHTML=`<header class="insights-heading"><div><span class="eyebrow">BEHIND THE ANSWER</span><h2>Answer insights.</h2></div><span class="insights-verdict ${tone}">${esc(verdict)}</span></header>
+    <div class="insights-selected"><span>Selected answer · ${esc(timeLabel(selected.created))}</span><p>${esc(d.question || state.chat?.title || 'Saved answer')}</p>${d.sample?'<span class="sample-badge">Illustrative sample · not a measured result</span>':''}</div>
+    <section class="insights-signal ${tone}"><span class="insights-signal-icon">${icon('shield')}</span><div><strong>Evidence risk signal</strong><p>${esc(risk)}</p></div></section>
+    <div class="insights-metrics"><div><span>Evidence coverage</span><strong>${coverage===null?'N/A':`${Math.round(coverage)}%`}</strong><small>Cited factual claims · not accuracy</small></div><div><span>Claims to inspect</span><strong>${inspect}</strong><small>${contradicted} conflicting · ${unverified} unverified</small></div><div><span>Guard action</span><strong class="insights-metric-text">${esc(guard)}</strong><small>${d.strict?'Reviewed-only display':'Original answer visible'}</small></div><div><span>Response time</span><strong class="insights-metric-text">${Number.isFinite(d.elapsed)?`${d.elapsed.toFixed(1)} s`:'Not recorded'}</strong><small>Retrieval + generation + review</small></div></div>
+    <div class="insights-controls"><button class="review-button" data-review="${esc(selected.id)}" data-review-tab="claims">View full analysis ${icon('chevron')}</button><button class="source-button" data-review="${esc(selected.id)}" data-review-tab="sources">Searched sources (${sources.length})</button><button class="source-button" data-review="${esc(selected.id)}" data-review-tab="draft">Review setup</button></div>
+    <section class="insights-section insights-sources"><div class="insights-section-title"><h3>${icon('file')} Searched sources</h3><button class="text-button" data-review="${esc(selected.id)}" data-review-tab="sources">${sources.length} source${sources.length===1?'':'s'} ↗</button></div><p class="insights-section-note">${esc(d.retrieval?.note || 'Exact passages available to this answer.')}</p>${sources.length?sources.slice(0,4).map(s=>`<article class="insights-source"><button data-review="${esc(selected.id)}" data-review-tab="sources">[${esc(s.id)}] ${esc(s.title)} ↗</button><small>${esc(s.provider || 'Retrieved passage')}</small><p>${esc(String(s.snippet || '').slice(0,220))}${String(s.snippet || '').length>220?'…':''}</p></article>`).join(''):'<p class="insights-empty">No source passages were available. A missing source does not mean the answer is false.</p>'}</section>
+    <section class="insights-section insights-claims"><div class="insights-section-title"><h3>${icon('shield')} Claim review</h3><span>${claims.length} claims</span></div>${visibleClaims.length?visibleClaims.map(c=>{const status=['supported','unverified','contradicted','not_factual'].includes(c.status)?c.status:'unverified';const source=sources.find(s=>String(s.id)===String(c.source));return `<article class="insights-claim ${status}"><span>${esc(status.replace('_',' '))}</span><p>${esc(c.text)}</p><small>${esc(c.reason || 'No reason recorded.')}</small>${c.quote&&source?`<details><summary>Reviewed passage · [${esc(source.id)}] ${esc(source.title)}</summary><blockquote>${esc(c.quote)}</blockquote><button class="text-button" data-review="${esc(selected.id)}" data-review-tab="sources">View source ↗</button></details>`:''}</article>`;}).join(''):'<p class="insights-empty">Claim-level reasons will appear when review finishes.</p>'}${claims.length>3?`<button class="text-button insights-all-claims" data-review="${esc(selected.id)}" data-review-tab="claims">Inspect all ${claims.length} claims ↗</button>`:''}</section>
+    <footer class="insights-limit">An unverified claim is not automatically false. Evidence coverage is not a hallucination probability. Select “Why this verdict” on any older answer to see its saved review.</footer>`;
+}
+
+function selectAnswerAnalysis(messageId) {
+  const message=state.chat?.messages.find(m=>m.id===messageId&&m.role==='assistant');
+  if(!message)return;
+  state.analysisMessageId=messageId;
+  renderInsights(message);
+}
+
 function renderChat(scrollToEnd=false) {
   const chat=state.chat, isChat=!!chat;
   $('welcome').hidden=isChat; $('chat').hidden=!isChat; $('export-button').hidden=!isChat;
   $('page-title').textContent=chat?.title || 'New research';
-  if (!chat) { $('chat').innerHTML=''; renderHistory(); return; }
+  if (!chat) { $('chat').innerHTML=''; renderHistory(); renderInsights(); return; }
   let html=`<div class="chat-meta">${icon('lock')} Saved in your workspace ${chat.sample?'<span class="sample-badge">Illustrative sample</span>':''}</div>`;
   html+=chat.messages.map(m => {
     if (m.role==='user') return `<article class="message user"><div class="user-bubble">${esc(m.content)}</div></article>`;
     const d=m.detail || {}, counts=d.review?.counts || {}, sourceCount=d.sources?.length || 0;
     const inspect=(counts.unverified || 0)+(counts.contradicted || 0);
     const verdict=d.cancelled?'Stopped before review':d.error?'Review incomplete':sourceCount===0?'No sources retrieved':inspect>0?'Some claims need review':'Claims matched the available evidence';
-    return `<article class="message assistant" id="message-${esc(m.id)}"><div class="assistant-header"><img src="/assets/logo.svg" alt=""> Grounded ${d.sample?'<span class="sample-badge">Sample answer</span>':''}<small>${esc(timeLabel(m.created))}</small></div><div class="message-content">${richText(m.content,m.id)}</div><section class="evidence-strip" aria-label="Evidence review for this answer"><div class="evidence-strip-copy"><span class="evidence-kicker">${icon('shield')} GROUNDED CHECK</span><strong>${esc(verdict)}</strong><small>${sourceCount} searched source${sourceCount===1?'':'s'} · ${counts.supported || 0} supported · ${inspect} to inspect</small></div><div class="evidence-actions"><button class="review-button" data-review="${esc(m.id)}" data-review-tab="claims">Why this verdict <span>↗</span></button><button class="source-button" data-review="${esc(m.id)}" data-review-tab="sources">View searched sources (${sourceCount})</button><button class="icon-button" data-copy="${esc(m.id)}" aria-label="Copy this answer">${icon('copy')}</button></div></section></article>`;
+    return `<article class="message assistant" id="message-${esc(m.id)}"><div class="assistant-header"><img src="./assets/logo.svg" alt=""> Grounded ${d.sample?'<span class="sample-badge">Sample answer</span>':''}<small>${esc(timeLabel(m.created))}</small></div><div class="message-content">${richText(m.content,m.id)}</div><section class="evidence-strip" aria-label="Evidence review for this answer"><div class="evidence-strip-copy"><span class="evidence-kicker">${icon('shield')} GROUNDED CHECK</span><strong>${esc(verdict)}</strong><small>${sourceCount} searched source${sourceCount===1?'':'s'} · ${counts.supported || 0} supported · ${inspect} to inspect</small></div><div class="evidence-actions"><button class="review-button" data-review="${esc(m.id)}" data-review-tab="claims">Why this verdict <span>↗</span></button><button class="source-button" data-review="${esc(m.id)}" data-review-tab="sources">View searched sources (${sourceCount})</button><button class="icon-button" data-copy="${esc(m.id)}" aria-label="Copy this answer">${icon('copy')}</button></div></section></article>`;
   }).join('');
-  if (state.job) html+=`<article id="pending-answer" class="message assistant"><div class="assistant-header"><img src="/assets/logo.svg" alt=""> Grounded</div><div class="phase-line" role="status"><span class="phase-dot"></span><span id="job-phase">Getting started…</span></div><div id="draft-notice" class="draft-notice">Draft in progress · evidence review follows generation</div><div id="job-text" class="message-content"></div></article>`;
+  if (state.job) html+=`<article id="pending-answer" class="message assistant"><div class="assistant-header"><img src="./assets/logo.svg" alt=""> Grounded</div><div class="phase-line" role="status"><span class="phase-dot"></span><span id="job-phase">Getting started…</span></div><div id="draft-notice" class="draft-notice">Draft in progress · evidence review follows generation</div><div id="job-text" class="message-content"></div></article>`;
   $('chat').innerHTML=html; renderHistory(); if(scrollToEnd) $('content-scroll').scrollTop=$('content-scroll').scrollHeight;
+  renderInsights();
 }
 
 async function loadChat(id) {
@@ -176,11 +232,28 @@ function setSearchEnabled(enabled) {
 function showModels() {
   closeSidebar();
   const usable=state.config.models || [], apiModels=usable.filter(m=>m.provider!=='local'), local=state.config.localModels || [], providers=state.config.providers || [];
-  const apiCards=apiModels.length?apiModels.map(m=>`<article class="model-card ready"><span class="model-status">Ready for chat</span><h3>${esc(m.model)}</h3><p>${esc(m.providerName)} API · key protected on the server</p></article>`).join(''):`<article class="model-card empty"><span class="model-status">Optional</span><h3>API models</h3><p>No API model is connected yet. Your installed local models still work in this same chat.</p></article>`;
-  const localCards=local.map(m=>`<article class="model-card ${m.installed?'installed':'empty'}"><span class="model-status">${m.installed?'Ready in this chat':'Optional local install'}</span><h3>${esc(m.name)}</h3><p>${esc(m.parameters)} parameters · ${esc(m.quantization)} · ${esc(m.license)}</p>${safeLink(m.downloadUrl)?`<a class="model-download" href="${safeLink(m.downloadUrl)}" target="_blank" rel="noopener noreferrer">${m.installed?'Model & download page':'View official download'} <span>↗</span></a>`:''}</article>`).join('') || '<p class="empty-state">No local model metadata is available.</p>';
-  const providerNotes={groq:'Owner Free Plan key and model ID',gemini:'Owner Gemini Free Tier key and model ID',openrouter:'Owner key with explicit :free model IDs only'};
-  const providerCards=providers.map(p=>`<div class="provider-row"><span><strong>${esc(p.name)}</strong><small>${esc(providerNotes[p.id] || 'Server-side API connection')}</small></span><span class="provider-state ${p.ready?'ready':''}">${p.ready?'Connected':'Not connected'}</span></div>`).join('');
-  openModal('Your model library.', `<p class="model-intro">Choose local or API models from the same chat. Local answers run on the computer hosting this workspace; API answers are sent to the selected provider.</p><section class="model-group"><div class="model-group-heading"><h3>Local models</h3><span>${local.filter(m=>m.installed).length}/${local.length} ready</span></div><div class="model-grid">${localCards}</div></section><section class="model-group"><div class="model-group-heading"><h3>API models</h3><span>${apiModels.length} connected</span></div><div class="model-grid">${apiCards}</div></section><section class="model-group"><div class="model-group-heading"><h3>API providers</h3></div><div class="provider-list">${providerCards}</div></section><p class="model-footnote">A hosted website cannot silently run a model on a visitor’s laptop. Future customers need the local companion/runtime plus model weights; the official model pages are linked above when a model is not installed.</p>`, 'MODELS & RUNTIMES', 'models');
+  const apiCards=apiModels.length?apiModels.map(m=>`<article class="model-card ready"><span class="model-status">Ready for chat</span><h3>${esc(m.model)}</h3><p>${esc(m.providerName)} · ${browserDeployment?'your key stays in this tab':'key held in server memory'}</p><button class="text-button" data-use-model="${esc(m.id)}">Use this model →</button></article>`).join(''):`<p class="empty-state">Connect your own provider key below. ${browserDeployment?'No shared API keys are embedded in this website.':'Your installed local models still work in this same chat.'}</p>`;
+  const files={ 'qwen2.5-1.5b':'https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q4_k_m.gguf?download=true', 'phi-3-mini':'https://huggingface.co/microsoft/Phi-3-mini-4k-instruct-gguf/resolve/main/Phi-3-mini-4k-instruct-q4.gguf?download=true', 'qwen3-4b':'https://huggingface.co/Qwen/Qwen3-4B-GGUF/resolve/main/Qwen3-4B-Q4_K_M.gguf?download=true' };
+  const localCards=local.map(m=>`<article class="model-card ${m.installed?'installed':'empty'}"><span class="model-status">${m.installed?'Ready in this chat':'Download for local use'}</span><h3>${esc(m.name)}</h3><p>${esc(m.parameters)} parameters · ${esc(m.quantization)} · ${esc(m.license)}</p>${m.installed?`<button class="text-button" data-use-model="${esc(m.chatId)}">Use this model →</button>`:''}${safeLink(m.fileUrl || files[m.id])?`<a class="model-download" href="${safeLink(m.fileUrl || files[m.id])}" target="_blank" rel="noopener noreferrer">${icon('download')} Download model weights</a>`:''}${safeLink(m.downloadUrl)?`<a class="model-download" href="${safeLink(m.downloadUrl)}" target="_blank" rel="noopener noreferrer">Model & download page ↗</a>`:''}</article>`).join('');
+  const providerLinks={groq:'https://console.groq.com/keys',gemini:'https://aistudio.google.com/apikey',openrouter:'https://openrouter.ai/settings/keys'};
+  const providerCards=providers.map(p=>`<div class="provider-row"><span><strong>${esc(p.name)}</strong><small><a href="${providerLinks[p.id]}" target="_blank" rel="noopener noreferrer">Get your own key ↗</a></small></span><span class="provider-state ${p.ready?'ready':''}">${p.ready?'Connected':'Not connected'}</span>${p.personal || p.connection==='personal'?`<button class="text-button" data-disconnect-provider="${esc(p.id)}">Disconnect</button>`:''}</div>`).join('');
+  openModal('Your model library.', `<p class="model-intro">Local and API models, one research workspace. Choose the model that fits your question.</p><section class="model-group"><div class="model-group-heading"><h3>API models</h3><span>${apiModels.length} connected</span></div><div class="model-grid">${apiCards}</div><div class="provider-list">${providerCards}</div><form id="provider-form" class="provider-connect"><h3>Connect your API key</h3><p>${browserDeployment?'Your key goes directly to the selected provider and stays only in memory in this tab. Closing or refreshing the tab disconnects it. Use your own key on a trusted device.':'Your key is held only in server memory for your signed-in account, never saved in chats. Restarting the server disconnects it.'}</p><label for="provider-choice">Provider</label><select id="provider-choice"><option value="groq">Groq</option><option value="gemini">Google Gemini</option><option value="openrouter">OpenRouter · :free models</option></select><label for="provider-key">Your API key</label><input id="provider-key" type="password" autocomplete="off" spellcheck="false" required placeholder="Paste your personal provider key"><div class="button-row"><button id="load-provider-models" class="secondary-button" type="button">Find available models</button></div><label for="provider-model">Available model</label><select id="provider-model" required disabled><option value="">Load the provider’s model list first</option></select><label class="free-confirm"><input id="free-confirm" type="checkbox" required> I use this provider’s free plan with billing disabled. Quotas and availability still apply.</label><p class="privacy-small">OpenRouter is restricted to explicit :free model IDs. This app cannot verify your Groq/Gemini billing plan; do not connect a billed project if you want free-only usage.</p><p id="provider-feedback" role="status"></p><button id="connect-provider" class="primary-button" type="submit" disabled>Connect and use model →</button></form></section><section class="model-group"><div class="model-group-heading"><h3>Local models</h3><span>${local.filter(m=>m.installed).length}/${local.length} ready here</span></div><div class="model-grid">${localCards}</div><p class="model-footnote">Downloading a file does not run it in your browser. Install the local app and its runtime, then open the same workspace on localhost. Your existing installed models are available there.</p><div class="button-row"><a class="secondary-button" href="https://github.com/Paila009/SOA#run-the-customer-workspace" target="_blank" rel="noopener noreferrer">Local setup instructions ↗</a><a class="text-button" href="https://github.com/Paila009/SOA/archive/refs/heads/main.zip">Download local app</a></div></section>`, 'MODELS & RUNTIMES', 'models');
+  const resetModels=()=>{$('provider-model').innerHTML='<option value="">Load the provider’s model list first</option>';$('provider-model').disabled=true;$('connect-provider').disabled=true;};
+  $('provider-choice').onchange=resetModels;$('provider-key').oninput=resetModels;
+  $('load-provider-models').onclick=async()=>{
+    if(!$('provider-key').value.trim()){toast('Enter your own provider key first.');return;}
+    $('load-provider-models').disabled=true;$('provider-feedback').textContent='Checking the provider’s current model list…';
+    try{const result=await api('/api/providers/models',{method:'POST',body:{provider:$('provider-choice').value,key:$('provider-key').value.trim()}});$('provider-model').innerHTML=result.models.map(m=>`<option value="${esc(m.id)}">${esc(m.name || m.model || m.id)}</option>`).join('');$('provider-model').disabled=!result.models.length;$('connect-provider').disabled=!result.models.length;$('provider-feedback').textContent=result.models.length?'Choose a model, then connect.':'No compatible models were returned.';}catch(err){resetModels();$('provider-feedback').textContent=err.message;}finally{$('load-provider-models').disabled=false;}
+  };
+  $('provider-form').onsubmit=async(e)=>{
+    e.preventDefault();$('connect-provider').disabled=true;
+    try{const cfg=await api('/api/providers/connect',{method:'POST',body:{provider:$('provider-choice').value,key:$('provider-key').value.trim(),model:$('provider-model').value,freeConfirmed:$('free-confirm').checked}});state.config={...state.config,...cfg};state.model=`${$('provider-choice').value}:${$('provider-model').value}`;$('provider-key').value='';renderModels();$('chat-availability').hidden=true;$('modal').close();toast('Model connected. You can chat now.');$('question').focus();}catch(err){$('provider-feedback').textContent=err.message;$('connect-provider').disabled=false;}
+  };
+  $('modal-content').onclick=async(e)=>{
+    const use=e.target.closest('[data-use-model]'),disconnect=e.target.closest('[data-disconnect-provider]');
+    if(use){if(state.job){toast('Stop the current answer before switching models.');return;}state.model=use.dataset.useModel;renderModels();storage.set('grounded:model',state.model);$('modal').close();$('question').focus();}
+    if(disconnect){try{state.config={...state.config,...await api('/api/providers/disconnect',{method:'POST',body:{provider:disconnect.dataset.disconnectProvider}})};renderModels();showModels();}catch(err){toast(err.message);}}
+  };
 }
 
 function showChatUnavailable() {
@@ -219,7 +292,8 @@ function openReview(messageId, tab='claims', sourceId=null) {
   const message=state.chat?.messages.find(m=>m.id===messageId);
   if(!message){toast('This answer review is not available in the current conversation.');return;}
   state.review=message;state.reviewTab=tab;
-  $('review-question').textContent=message.detail.question || state.chat.title;
+  selectAnswerAnalysis(messageId);
+  $('review-question').textContent=message.detail?.question || state.chat.title;
   renderReview();if(!$('review-dialog').open)$('review-dialog').showModal();
   if(sourceId){const target=$(`source-${sourceId}`);if(target)target.scrollIntoView({block:'start'});else toast('That citation has no retrieved source. Treat it as unverified.');}
 }
@@ -253,6 +327,7 @@ function setBusy(busy) {
 async function submitResearch() {
   if(state.job)return;
   const question=$('question').value.trim();if(!question){$('question').focus();return;}
+  if(state.sessionError){toast(state.sessionError);return;}
   if(state.config.preview || !$('model').value){showChatUnavailable();return;}
   const model=$('model').value;
   const selected=state.config.models.find(m=>m.id===model);
@@ -265,19 +340,24 @@ async function submitResearch() {
   try{
     const result=await api('/api/research',{method:'POST',body:{chatId:state.chat?.sample?null:(state.chat?.id || null),question,model,mode:$('mode').value,search:state.search,strict:state.strict,documents:[...state.selectedDocs],consent:selected?.provider!=='local'}});
     state.job=result;state.chat=await api(`/api/chats/${result.chatId}`);$('question').value='';storage.set(lastChatKey(),result.chatId);renderChat(true);await refreshWorkspace();await pollJob(result);
-  }catch(err){toast(err.message);}finally{state.job=null;setBusy(false);$('send-button').disabled=false;}
+  }catch(err){
+    if(err.status===401){state.sessionError='Your session could not be verified. Sign in again using the account menu.';renderModels();}
+    toast(err.message);
+  }finally{state.job=null;setBusy(false);$('send-button').disabled=false;}
 }
 
 async function pollJob(job) {
   let failures=0;
+  const epoch=state.epoch;
   const deadline=Date.now()+390000;
-  while(state.job?.jobId===job.jobId){
+  while(state.job?.jobId===job.jobId && epoch===state.epoch){
     if(Date.now()>deadline){
       try{await api(`/api/jobs/${job.jobId}/stop`,{method:'POST',timeoutMs:8000});}catch{/* The request may already have ended. */}
       throw new Error('This answer exceeded the six-minute safety limit and was stopped. Try a shorter question or another model.');
     }
     try{
       const result=await api(`/api/jobs/${job.jobId}`,{timeoutMs:10000});failures=0;
+      if(epoch!==state.epoch)return;
       const scroll=$('content-scroll'), nearBottom=scroll.scrollHeight-scroll.scrollTop-scroll.clientHeight<130;
       const seconds=Math.max(0,Math.round(Date.now()/1000-(result.createdAt || Date.now()/1000)));
       if($('job-phase'))$('job-phase').textContent=result.phase.charAt(0).toUpperCase()+result.phase.slice(1)+`… ${seconds}s`;
@@ -285,7 +365,7 @@ async function pollJob(job) {
       if($('draft-notice'))$('draft-notice').textContent=state.strict?'Draft hidden until its evidence review completes.':'Draft in progress · evidence review follows generation';
       if(nearBottom)scroll.scrollTop=scroll.scrollHeight;
       if(result.done){
-        state.job=null;state.chat=await api(`/api/chats/${job.chatId}`);renderChat(true);await refreshWorkspace();
+        state.job=null;state.chat=await api(`/api/chats/${job.chatId}`);state.analysisMessageId=null;renderChat(true);await refreshWorkspace();
         if(result.error){const error=document.createElement('div');error.className='request-error';error.textContent=result.error;$('chat').append(error);toast('The request did not finish. See the message in your conversation.');}
         return;
       }
@@ -299,6 +379,7 @@ async function startWorkspace() {
   $('avatar').textContent=(state.user?.displayName || state.user?.email || 'G')[0].toUpperCase();
   $('account-plan').textContent=state.config.preview?'Explore at your own pace':'Personal research workspace';
   await refreshWorkspace();
+  state.sessionError=null;renderModels();
   const last=storage.get(lastChatKey());
   if(last&&state.chats.some(c=>c.id===last))await loadChat(last);else newChat(false);
 }
@@ -318,10 +399,11 @@ async function setupAuth() {
   const [appModule,authModule]=await Promise.all([import('https://www.gstatic.com/firebasejs/13.0.0/firebase-app.js'),import('https://www.gstatic.com/firebasejs/13.0.0/firebase-auth.js')]);
   state.firebase=authModule;state.auth=authModule.getAuth(appModule.initializeApp(cfg));
   authModule.onAuthStateChanged(state.auth,async(user)=>{
-    state.epoch++;state.user=user;state.chat=null;state.chats=[];state.documents=[];state.selectedDocs.clear();
+    state.epoch++;state.user=user;state.chat=null;state.chats=[];state.documents=[];state.selectedDocs.clear();state.sessionError=null;
+    if(browserRuntime)browserRuntime.clearSession();
     $('review-dialog').close();$('modal').close();renderChat();renderHistory();renderAttached();
     if(user && !user.emailVerified){if(state.creatingAccount)return;showAuth(true);$('auth-error').textContent='Check your inbox to verify your email, then sign in again.';await authModule.signOut(state.auth);return;}
-    if(user){showWorkspace();try{await startWorkspace();}catch(err){showWorkspace();$('connection-label').textContent='Session needs refresh';$('workspace-status').title=err.message;toast('Your sign-in is still active, but the workspace could not refresh. Try again in a moment.');}}
+    if(user){showWorkspace();try{await startWorkspace();}catch(err){state.sessionError=err.message;showWorkspace();renderModels();$('composer-status').textContent=err.status===401?'Sign in again from the account menu.':'Workspace connection failed. Click the status above to retry.';toast(err.message);}}
     else showAuth();
   });
 }
@@ -332,6 +414,8 @@ function bindEvents(){
   matchMedia('(max-width:760px)').addEventListener('change',closeSidebar);
   $('sidebar-shade').onclick=closeSidebar;
   $('new-chat').onclick=newChat;$('home-button').onclick=newChat;$('models-button').onclick=showModels;
+  $('availability-connect').onclick=showModels;
+  $('workspace-status').onclick=async()=>{if(!state.user)return;try{await state.user.getIdToken(true);await startWorkspace();toast('Workspace connection restored.');}catch(err){state.sessionError=err.message;renderModels();toast(err.message);}};
   $('history-search').oninput=renderHistory;
   $('history-list').onclick=async(e)=>{const b=e.target.closest('button');if(!b)return;try{if(b.dataset.chat)await loadChat(b.dataset.chat);else if(b.dataset.deleteChat){if(preventWhileRunning())return;if(!confirm('Delete this conversation and its saved reviews?'))return;await api(`/api/chats/${b.dataset.deleteChat}`,{method:'DELETE'});if(state.chat?.id===b.dataset.deleteChat)newChat();await refreshWorkspace();}}catch(err){toast(err.message);}};
   for(const id of ['sample-button','welcome-sample','availability-sample'])$(id).onclick=loadSample;
@@ -354,6 +438,7 @@ function bindEvents(){
     if(b.dataset.cite)openReview(b.dataset.message,'sources',b.dataset.cite);
     if(b.dataset.copy){const m=state.chat.messages.find(m=>m.id===b.dataset.copy);if(m){try{await navigator.clipboard.writeText(m.content);toast('Answer copied.');}catch{toast('Clipboard access was denied by the browser.');}}}
   };
+  $('answer-insights').onclick=e=>{const b=e.target.closest('[data-review]');if(b)openReview(b.dataset.review,b.dataset.reviewTab || 'claims');};
   $('review-tabs').onclick=e=>{const b=e.target.closest('[data-tab]');if(b){state.reviewTab=b.dataset.tab;renderReview();}};
   $('review-content').onclick=e=>{const b=e.target.closest('[data-source-tab]');if(b)openReview(state.review.id,'sources',b.dataset.sourceTab);};
   $('export-button').onclick=async()=>{if(!state.chat)return;try{const blob=await api(`/api/chats/${state.chat.id}/export`,{asBlob:true});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download='grounded-research.md';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}catch(err){toast(err.message);}};
@@ -374,12 +459,7 @@ async function init(){
   setSearchEnabled(storage.get('grounded:search')!=='false');
   try{
     state.config=await api('/api/config');
-    const chatAvailable=!state.config.preview&&state.config.models.length>0;
-    $('model-count').textContent=(state.config.models?.filter(m=>m.provider!=='local').length || 0)+(state.config.localModels?.length || 0);
-    $('connection-label').textContent=state.config.preview?'Preview':chatAvailable?'Research workspace':'Chat unavailable';
-    $('workspace-status').title=state.config.preview?'Preview workspace · live chat is not available yet':chatAvailable?'Your personal research workspace':'Live chat is temporarily unavailable';
-    if(chatAvailable){$('model').innerHTML=state.config.models.map(m=>`<option value="${esc(m.id)}">${esc(m.model)} · ${esc(m.providerName)}</option>`).join('');const saved=storage.get('grounded:model');if(state.config.models.some(m=>m.id===saved))$('model').value=saved;state.model=$('model').value;$('model').disabled=false;}
-    else $('composer-status').textContent=state.config.preview?'Preview · live chat is not available yet.':'Live chat is temporarily unavailable.';
+    renderModels();
     await setupAuth();$('boot').hidden=true;
   }catch(err){$('boot').hidden=true;$('auth-page').hidden=false;$('auth-error').textContent=err.message;$('auth-back').hidden=true;for(const id of ['google-login','auth-submit','auth-toggle','forgot-password'])$(id).disabled=true;}
 }

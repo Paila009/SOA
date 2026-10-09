@@ -1,10 +1,14 @@
-name: Publish Grounded showcase
+name: Publish Grounded workspace
 
 on:
   push:
     branches: [main]
     paths:
       - "pages/**"
+      - "customer/web/**"
+      - "scripts/build_pages.py"
+      - "tests/customer_ui.test.cjs"
+      - "tests/browser_runtime.test.cjs"
       - ".github/workflows/pages.yml"
   workflow_dispatch:
 
@@ -25,10 +29,23 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Validate workspace behavior before publishing
+        run: |
+          node --check customer/web/app.js
+          node --check customer/web/browser-runtime.js
+          node --test tests/customer_ui.test.cjs tests/browser_runtime.test.cjs
+      - name: Build the actual customer workspace
+        run: python scripts/build_pages.py
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v4
         with:
-          path: pages
+          path: dist/pages
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4

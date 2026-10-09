@@ -2,34 +2,36 @@
 
 ## What this build does
 
-The customer app uses one responsive interface for installed local GGUF models and optional model APIs. Local inference runs through llama.cpp on the computer hosting the workspace; API inference runs at the selected provider. A public website still needs ordinary web/backend hosting, and a visitor cannot use models on their own laptop without a separately installed local companion/runtime.
+The customer app uses one responsive interface for installed local GGUF models and model APIs. On localhost, local inference runs through llama.cpp on the computer hosting the workspace and API calls run through Python. At [paila009.github.io/SOA](https://paila009.github.io/SOA/), the same interface runs in browser mode: Firebase login, personal API connections, streamed answers, source/claim review, documents, and saved history. Browser mode sends requests directly to the user's selected provider with their own temporary key; it does not need to host model weights.
+
+Public browser history and documents are stored per Firebase account in that browser's IndexedDB. They do not synchronize across devices. Personal keys stay in memory and are cleared on refresh or sign-out. Localhost instead stores histories in account-scoped SQLite and personal provider connections in server memory until disconnect or restart. Shared owner keys require a separately hosted backend. Downloaded local GGUF files need a local runtime/app; they cannot execute on GitHub Pages.
 
 | Application | Start command | Local address | Purpose |
 | --- | --- | --- | --- |
-| Customer workspace | `./run_customer.ps1` | `http://localhost:8770` | API-based research, accounts, saved reviews |
+| Customer workspace | `./run_customer.ps1` | `http://localhost:8770` | Local/API research, accounts, saved reviews |
 | Existing research dashboard | `./run_dashboard.ps1` | `http://127.0.0.1:8766` | Optional specialist internal-signal experiments |
 
-Nothing is publicly deployed, and no GitHub push is included in this change.
+GitHub Pages serves the browser edition. The Python backend and installed local models remain on the workspace host unless deployed separately.
 
 ### Included
 
 - Research, Compare (topics), and Write modes; conversational context; server-streamed drafts delivered through owner-scoped job polling; Stop control.
 - Qwen2.5 1.5B, Phi-3 Mini 3.8B, and Qwen3 4B in the same customer chat when their local GGUF files and llama.cpp runtime are installed.
-- Optional explicitly configured Groq Free Plan, Gemini Free Tier, and OpenRouter `:free` models. All API requests originate on the server; the browser never receives a provider key.
-- Firebase email/password registration, verification, password reset, and Google sign-in wiring. The server verifies ID tokens (including revocation) and requires a verified email.
+- Personal Groq, Gemini, and OpenRouter API connections through the Models panel, with a provider model list and exact-model selection. On localhost, the backend keeps personal keys in account-scoped memory. Pages mode uses personal browser-memory keys directly. Shared owner keys remain server-only.
+- Firebase email/password registration, verification, password reset, and Google sign-in wiring. Localhost validates ID-token signatures/claims against Google's public certificates and requires verified email. Credential-backed revocation checks are optional.
 - Per-account SQLite conversations, answer-level evidence snapshots/reviews, Markdown exports, text-document library, and explicit deletion controls.
 - Claim review with supported, contradicted, unverified, and nonfactual labels. Supported/contradicted verdicts require a quoted passage that actually exists in the returned evidence.
-- Source and claim drawers that open for the selected saved answer, not just the latest reply.
+- Visible verdict/source actions and an evidence panel that open for the selected saved answer, not just the latest reply.
 - Compact mobile/laptop layouts, native accessible dialogs, keyboard actions, reduced-motion support, and escaped text rendering.
-- A Models library that clearly separates configured Groq live-chat models, installed local research models, and providers disabled by the free-only policy.
+- A Models library with personal API connection controls, connected models, local installation status, and official model download links.
 
 ### Not yet connected or established
 
-The Firebase web configuration, Google sign-in, and local models are connected on `localhost`; a real local Qwen smoke response succeeded. No API-provider key/model has been configured, so provider responses, provider billing status, and deployment are not verified. Do not present the hand-authored sample, local text matching, or offline tests as evidence of detector accuracy.
+The Firebase web configuration, Google sign-in, and local models were connected on `localhost`; a real local Qwen smoke response succeeded. This update repairs backend token verification and adds real personal-provider connections. No actual provider key was supplied, so successful live API generation, provider quotas, and billing status remain unverified. Public Google sign-in also requires `paila009.github.io` to be an authorized Firebase domain. Do not present the hand-authored sample, local text matching, or offline tests as evidence of detector accuracy.
 
 ### Customer interface versus owner setup
 
-Infrastructure setup belongs in this owner guide, not in the customer workspace. The Preferences dialog only controls answer display and source search, with selections saved in the current browser. The normal interface does not show Firebase/provider connection checklists, environment-file instructions, or API-key requests. If live chat is unavailable, an inline message preserves the typed question and offers a labelled sample conversation; it does not open a setup popup. This presentation change does not bypass authentication or enable unconfigured model calls.
+Infrastructure setup belongs in this owner guide. Preferences controls answer display and source search. Models offers the user-facing personal API connection form and official local-model downloads; environment-file and Firebase Admin instructions stay out of normal customer flows. If live chat is unavailable, an inline message preserves the typed question and offers a labelled sample conversation. Missing connections and authentication failures are shown explicitly rather than leaving the composer busy indefinitely.
 
 ## 1. Install once
 
@@ -51,7 +53,11 @@ The app loads `customer/.env`. Existing environment variables take precedence. D
 
 Local chat is enabled by default with `ENABLE_LOCAL_MODELS=true` and requires no model API key. On this laptop, all three listed local models are installed and appear in the main customer model selector.
 
-Optional API models require an owner-created key stored only in `customer/.env`, never in chat or frontend code. The project supports Groq Free Plan, Gemini Free Tier, and OpenRouter model IDs explicitly ending in `:free`. Provider policies and model availability can change; the confirmation flags are owner acknowledgements, not billing verification.
+For a personal API connection, sign in, open **Models**, choose Groq, Google Gemini, or OpenRouter, enter your own key in that connection form, load its current chat-model list, choose an exact model, and confirm your free-plan/model selection. Use Disconnect to remove the connection. Never put a provider key into a chat message. Localhost validates the key through read-only provider endpoints before adding the model; the key is kept only for your account in the running server's memory. Pages mode validates and uses the key directly in browser memory, clearing it on refresh/sign-out.
+
+On the Python backend, the same personal key is used for generation and API evidence review. Pages mode makes a generation request, then applies a conservative passage-matching review in the browser without a second model call. A configured model may still fail because of provider quota, account permissions, a discontinued ID, or browser CORS restrictions. No provider key is bundled with the site. Free-plan confirmation is an acknowledgement, not a billing-verification API: Groq/Gemini keys on paid accounts may incur charges. OpenRouter choices are restricted to text models explicitly ending in `:free` with zero prompt/completion/request pricing in the returned catalog. Provider terms and free limits can change.
+
+For shared owner API access through the Python backend, put an owner-created key only in the ignored `customer/.env`. The following configuration is not used by the public Pages browser edition:
 
 Check the account's current [free-plan model limits](https://console.groq.com/docs/rate-limits) and choose an available chat model from your console. Model access changes, so there is no silently selected default; the old Llama default has been removed. Comma-separated model IDs are supported. A model appearing in the selector means it is configured, not that access has been tested.
 
@@ -88,13 +94,13 @@ Run the offline, secret-safe readiness check:
 .\.venv-customer\Scripts\python.exe -m customer.check_setup
 ```
 
-This lists missing configuration without printing secrets or making API calls. It does **not** validate provider access, billing, Firebase Admin credentials, or real login. Connect Firebase in step 3 and restart the server before testing an actual question. Preview still cannot make API calls; authentication has not been bypassed.
+This lists server configuration without printing secrets or making API calls. It does **not** validate provider access, billing, Firebase Admin credentials, or real login. Its Admin credential-path entry is optional when `FIREBASE_CHECK_REVOKED=false`. Personal browser/server-memory connections do not appear as saved `.env` keys in this check. Connect Firebase in step 3 and restart the server before testing an actual question. Preview still cannot make API calls.
 
 Optional: set `REVIEW_MODEL=groq:model-id` to use another allowed configured Groq model for evidence review. Otherwise the selected generation model also reviews the draft. Using the same model can create correlated errors.
 
-Each factual research answer can consume **two API requests from the shared free quota**: generation and review. Generation is capped by `MAX_OUTPUT_TOKENS` (default 1,400); a structured review can use up to 3,500 output tokens. All customers share the provider organization's limits, so a free tier is not an unlimited public service. Long context can exhaust token limits even when request counts look small.
+Each factual API research answer on the Python backend can consume **two API requests**: generation and review. Generation is capped by `MAX_OUTPUT_TOKENS` (default 1,400); a structured review can use up to 3,500 output tokens. Pages mode uses one model-generation request and a browser passage matcher for review. Personal connections consume that user's provider quota; shared-owner connections consume a shared provider organization quota. A free tier is not an unlimited public service. Long context can exhaust token limits even when request counts look small.
 
-On HTTP 429, generation stops without retry/fallback and a shared in-process cooldown respects integer `Retry-After` seconds (bounded 1–86,400; otherwise 60 seconds). During cooldown, new requests are rejected before creating a conversation or spending an app request slot. Already-running requests may still finish. A review-only quota failure preserves the draft and explicitly marks its claims unverified. The cooldown resets on restart; provider limits do not. Stop closes the outgoing response where possible but does not restore already consumed quota. No successful live provider call has been tested without your credentials.
+On HTTP 429, Python generation stops without retry/fallback and a connection-scoped cooldown respects integer `Retry-After` seconds (bounded 1–86,400; otherwise 60 seconds). Shared owner connections retain a shared cooldown. During cooldown, new requests are rejected before creating a conversation or spending an app request slot. Already-running requests may still finish. A review-only quota failure preserves the draft and explicitly marks its claims unverified. The cooldown resets on restart; provider limits do not. Stop closes the outgoing response where possible but does not restore already consumed quota. No successful live provider call has been tested without your credentials.
 
 Official adapter references:
 
@@ -108,7 +114,7 @@ In your Firebase project:
 
 1. Add a Web app and obtain its public configuration.
 2. In Authentication, enable Email/Password and Google (if desired).
-3. Add `127.0.0.1`, `localhost`, and eventually your actual website domain to authorized domains as appropriate. Configure your sender/templates and support email.
+3. Add `127.0.0.1`, `localhost`, and `paila009.github.io` (for this Pages workspace) to Authentication's authorized domains. Add any future production domain separately. Configure your sender/templates and support email.
 4. Put the web configuration fields into `customer/.env`:
 
 ```dotenv
@@ -120,11 +126,13 @@ FIREBASE_APP_ID=your-web-app-id
 
 These are web configuration identifiers, not the model API secret or Firebase Admin private key. You may share this web config to finish integration. **Do not share a service-account private key in chat.**
 
-5. Give the backend Application Default Credentials for the intended Firebase project, or store the Admin service-account JSON outside this repository and set its absolute path in `GOOGLE_APPLICATION_CREDENTIALS`. Protect that file and restrict access. Do not upload it to the website or GitHub.
+5. Leave `FIREBASE_CHECK_REVOKED=false` for ordinary signed-token verification. The backend uses Google's public certificates and strictly checks RS256 signatures, signing key, project audience, issuer, subject, expiry, issued-at, and auth-time. No Admin file is needed for these checks. For immediate disabled-user/revoked-token checks, set `FIREBASE_CHECK_REVOKED=true` and provide Application Default Credentials or an Admin service-account JSON outside the repository via `GOOGLE_APPLICATION_CREDENTIALS`. Never upload that private file to the website or GitHub.
 6. Restart `run_customer.ps1`. The app now requires Firebase login instead of local preview.
 7. Create an account, verify its email, and sign in again. Google accounts with a verified email can sign in directly. Use two accounts to verify that conversations/documents cannot cross account boundaries.
 
-The frontend uses pinned Firebase browser modules. The backend validates Firebase ID tokens with `check_revoked=True`; arbitrary client-supplied user IDs are never trusted. User data is stored in SQLite, **not Firestore**. Firestore rules are not a substitute for the backend's ownership checks.
+The frontend uses pinned Firebase browser modules. Arbitrary client-supplied user IDs are never trusted by the backend. Normal verification accepts only valid signed Firebase ID tokens with a verified email. Google-certificate network failures return a retryable service error; invalid/expired tokens return an authentication error. An Admin credential problem cannot cause ordinary login failure when optional revocation checking is disabled. Default verification does not immediately detect disabled accounts or revoked, still-unexpired tokens; enable the optional credential-backed checks when that behavior is needed.
+
+Localhost user data is stored in SQLite, **not Firestore**. Pages uses IndexedDB scoped to the signed-in account and current browser. Neither edition uses Firestore for histories; Firestore rules do not replace backend ownership checks. Pages uses Firebase's authentication session for its local interface and does not pretend to verify tokens on an absent Python server.
 
 Official references: [Firebase web setup](https://firebase.google.com/docs/web/alt-setup), [server ID-token verification](https://firebase.google.com/docs/auth/admin/verify-id-tokens).
 
@@ -134,9 +142,9 @@ The pipeline retrieves Wikipedia introductory passages (up to four, or two per t
 
 Documents are capped at 40,000 characters each; uploaded text is stored privately on the app server. Only selected, question-ranked excerpt windows are sent to the model. It is not full-paper ingestion or a complete academic literature review. PDFs should be exported to relevant text first. Scanned PDFs, citations behind paywalls, scholarly ranking, and arbitrary URL fetching are not implemented.
 
-After API generation, a second API request reviews up to 24 sentence-sized claims against those passages. Local generation instead uses a conservative local passage-matching review and makes no second model API call. The backend rejects fabricated source IDs and quotations in API reviews. Both methods improve traceability but do not prove logical entailment, source reliability, or factual truth.
+After API generation on the Python backend, a second API request reviews up to 24 sentence-sized claims against those passages. Local GGUF generation uses a conservative local passage matcher instead. Pages mode also reviews in the browser with conservative exact/near-verbatim passage matching and makes no second review API call. It can miss paraphrases and does not establish semantic contradiction. The backend rejects fabricated source IDs and quotations in API reviews. All methods improve traceability but do not prove logical entailment, source reliability, or factual truth. The selected answer's Details tab identifies the method actually used.
 
-The default "Full answer" preference shows a draft while it is being generated and attaches a review afterward. Every completed answer has a visible evidence strip with separate **Why this verdict** and **View searched sources** actions; the drawer preserves the grounded check, exact searched passages, and review method. The optional "Reviewed answer" preference holds the draft until the review finishes, then filters to supported/nonfactual claims. It is **post-generation filtering**, not internal causal steering or token-level hallucination prevention. Manual Stop is available during the job. Browser API calls have bounded response times and a generation that exceeds the six-minute safety window is stopped instead of leaving the composer permanently busy.
+The default "Full answer" preference shows a draft while it is being generated and attaches a review afterward. Every completed answer has a visible evidence strip with separate **Why this verdict** and **View searched sources** actions; the evidence panel preserves that answer's grounded check, exact searched passages, and review method. Selecting an older saved answer restores its own snapshot. The optional "Reviewed answer" preference holds the draft until the review finishes, then filters to supported/nonfactual claims. It is **post-generation filtering**, not internal causal steering or token-level hallucination prevention. Manual Stop is available during the job. Requests have bounded response times; the composer recovers after completion, cancellation, or a reported failure.
 
 Coverage is the fraction of reviewed factual claims marked supported. It is **not** calibrated accuracy, confidence, or a hallucination probability. Missing evidence is unverified, not false. Retrieval/reviewer failure is surfaced, and no substitute evidence is invented. Source snapshots and original filtered drafts remain available in saved reviews.
 
@@ -146,7 +154,7 @@ The separate research probes (aligned Qwen entropy/logistic/MLP results) are unc
 
 This is a runnable, connection-ready **private-beta foundation**, not an audited public production service. Before accepting real customer data:
 
-- Configure `APP_ENV=production`, an HTTPS `PUBLIC_ORIGIN`, all Firebase web fields, and server-side credentials. Production fails closed without required configuration. Bind the backend behind a trusted HTTPS reverse proxy; do not expose the unconfigured preview.
+- Configure `APP_ENV=production`, an HTTPS `PUBLIC_ORIGIN`, and all Firebase web fields. Shared API keys stay server-side; Firebase Admin credentials are required only if optional revocation checks are enabled. Production fails closed without required configuration. Bind the backend behind a trusted HTTPS reverse proxy; do not expose the unconfigured preview.
 - Use one application worker on a persistent disk with SQLite backups and restore testing. Jobs/concurrency limits are in-process; multiple workers/replicas require a shared job queue and centralized rate limits. A server restart interrupts active jobs, though already saved messages remain.
 - Set provider-side spending limits/alerts. App limits count research jobs, not currency. Default caps are 30 requests per user and 200 total per rolling 24h, plus six per user per minute and four simultaneous jobs globally. Token counts/charges are not metered by the app.
 - Add edge-level abuse protection for signup and authentication, central monitoring without prompt/secret leakage, dependency/security review, and realistic concurrent-user load tests.
@@ -170,12 +178,24 @@ Customer regression tests cover unauthenticated/unverified denial, user isolatio
 
 Browser checks include a saved sample answer's review and source tabs after refresh, mobile navigation, and viewport bounds for the composer and review drawer. Live endpoint `/api/health` identifies this service as `grounded-customer` to distinguish it from the original dashboard.
 
-### Latest verification — 2026-10-09
+### Verification — 2026-10-09
 
-Unified-model and navigation checks: 33 customer backend tests and nine frontend behavior tests pass. The complete Python regression suite passes 69/69 tests with the optional NLI runtime enabled. The unrelated-evidence regression is fixed: an unverified claim no longer keeps a source link or passage merely because of incidental overlap. The checks cover free-only API gates, streaming, Stop, shared quota cooldown, unverified review on quota exhaustion, stale-token retry, signed-in navigation, same-view local selection, local execution without API consent, and the visible verdict/source actions attached to completed answers. Compilation and JavaScript syntax checks pass; the authenticated localhost service publishes all three local models, and a real Qwen local response succeeded. No API-provider key/model is connected, so API-generation checks remain mocked/offline.
+Earlier verification covered 69 Python tests and nine frontend behavior tests, a real local-Qwen end-to-end job, compilation, and JavaScript syntax. The new per-account provider changes pass 44 focused provider/customer tests, including catalog verification, authentication gates, key redaction, unchanged owner settings, user isolation, captured job credentials, and streaming through the real adapter with mocked HTTP responses. Full integrated tests and the new Pages deployment are verified separately before publication. No actual provider key has been supplied, so no live API-generation or free-billing result is claimed.
 
 ## GitHub Pages
 
-The `pages/` directory and `.github/workflows/pages.yml` publish a static interactive showcase at `https://paila009.github.io/SOA/`. It intentionally does not imitate a working hosted chat: GitHub Pages cannot run FastAPI, Firebase Admin token verification, SQLite, retrieval, API proxying, or local llama.cpp models. Deploy the Python service on an HTTPS backend host before presenting login and chat as a public customer service.
+The workflow `.github/workflows/pages.yml` runs `scripts/build_pages.py` and deploys `dist/pages` to [paila009.github.io/SOA](https://paila009.github.io/SOA/). The builder copies the canonical `customer/web` interface with its browser runtime; it no longer deploys a separate marketing showcase. Its allowlist includes frontend assets and the four public Firebase web identifiers from `pages/firebase-config.json`. Provider keys, service-account files, SQLite data, research outputs, and model weights are excluded.
 
-Live browser automation was unavailable because the Windows UI helper failed to start, so the latest verification used endpoint checks, a real local-Qwen end-to-end job, JavaScript behavior tests, and the complete Python suite. Earlier laptop/phone layout checks remain recorded above.
+To build locally:
+
+```powershell
+python scripts/build_pages.py
+```
+
+The public interface requires Firebase login before live chat. In Firebase Console, authorize `paila009.github.io` for Google sign-in. A user then opens Models, connects their own free-plan API key, selects a returned chat model, and sends a question. The chosen provider receives the question and selected evidence directly from the browser. Keys are held only for the current page lifetime, while documents/conversations/reviews persist in browser storage scoped to the Firebase user. Clearing site data removes that browser's history; it is not a cross-device cloud workspace.
+
+The Models panel also offers official local-model file downloads and local setup guidance. Follow [LOCAL_MODELS.md](LOCAL_MODELS.md) for the runtime folder, exact weight filenames, and startup steps. Downloading weights alone does not activate browser chat: run the downloaded model through the runtime and this Python app. Pages cannot start llama.cpp, reach a visitor's installed models automatically, or use the owner laptop's models as a public server.
+
+For customers to use shared owner API keys, synchronized server histories, and server-side verification/review, deploy the Python service on an HTTPS backend host. The public browser edition is a private-beta implementation with provider/browser limits and unvalidated evidence screening; no production-readiness or calibrated reliability claim is made.
+
+Earlier Windows browser automation was unavailable because the UI helper failed to start; those earlier checks used endpoints and tests. Current deployment and browser-verification results should be recorded from the integrated run rather than inferred from that older check.

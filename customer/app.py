@@ -10,12 +10,15 @@ from pathlib import Path
 from urllib.parse import unquote, urlparse
 
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from dashboard.search_runtime import search_web_detailed
+from .auth import FirebaseTokenVerifier, VerificationUnavailable
 from .config import Settings, load_settings
+from .connections import Connections, list_provider_models
 from .provider import Cancelled, Job, ModelAPI, ProviderError, RateLimitError
 from .review import review_answer, review_local_answer, split_claims, summarize
 from .store import Store
@@ -62,19 +65,28 @@ class ResearchRequest(BaseModel):
     consent: bool = False
 
 
+class ProviderRequest(BaseModel):
+    provider: str
+
+
+class ProviderModelsRequest(ProviderRequest):
+    key: str = Field(default="", repr=False)
+
+
+class ProviderConnectRequest(ProviderModelsRequest):
+    model: str = ""
+    freeConfirmed: bool = False
+
+
 def create_app(settings: Settings | None = None, token_verifier=None, model_api=None):
     settings = (settings or load_settings()).validate()
     app = FastAPI(title="Grounded workspace", docs_url=None, redoc_url=None, openapi_url=None)
     store, api = Store(settings.database), model_api or ModelAPI(settings)
+    connections = Connections()
     jobs, job_lock = {}, threading.RLock()
     preview_secret = secrets.token_bytes(32)
-    firebase_app = None
     if settings.firebase.get("projectId") and token_verifier is None:
-        import firebase_admin
-        firebase_app = firebase_admin.initialize_app(options={"projectId": settings.firebase["projectId"]}, name="grounded-" + secrets.token_hex(6))
-        from firebase_admin import auth
-        def token_verifier(token):
-            return auth.verify_id_token(token, app=firebase_app, check_revoked=True)
+        token_verifier = FirebaseTokenVerifier(settings.firebase["projectId"], settings.firebase_check_revoked)
 
     app.state.store, app.state.jobs = store, jobs
     app.add_middleware(BodyLimit)
@@ -98,6 +110,13 @@ def create_app(settings: Settings | None = None, token_verifier=None, model_api=
     async def not_found(request, exc):
         return JSONResponse({"detail": "This item was not found in your workspace."}, status_code=404)
 
+    @app.exception_handler(RequestValidationError)
+    async def invalid_request(request, exc):
+        # Pydantic's default errors echo invalid inputs, including submitted keys.
+        errors = [{"loc": item["loc"], "msg": item["msg"], "type": item["type"]}
+                  for item in exc.errors()]
+        return JSONResponse({"detail": errors}, status_code=422)
+
     def owner(request: Request, response: Response):
         if settings.preview:
             if not request.client or request.client.host not in {"127.0.0.1", "::1", "testclient"}:
@@ -118,13 +137,18 @@ def create_app(settings: Settings | None = None, token_verifier=None, model_api=
             uid = decoded["uid"]
             if not isinstance(uid, str) or not uid:
                 raise ValueError()
-            if not decoded.get("email_verified", False):
+            if decoded.get("email_verified") is not True:
                 raise HTTPException(403, "Verify your email before using your workspace, then sign in again.")
+            request.state.email_verified = True
             return uid
         except HTTPException:
             raise
+        except VerificationUnavailable:
+            raise HTTPException(503, "Sign-in verification is temporarily unavailable. Please try again in a moment.",
+                                headers={"Retry-After": "10", "X-Auth-Error": "verification-unavailable"}) from None
         except Exception:
-            raise HTTPException(401, "Your sign-in session could not be verified. Please sign in again.") from None
+            raise HTTPException(401, "Your sign-in session could not be verified. Please sign in again.",
+                                headers={"X-Auth-Error": "invalid-session"}) from None
 
     @app.get("/api/config")
     def config():
@@ -132,11 +156,53 @@ def create_app(settings: Settings | None = None, token_verifier=None, model_api=
 
     @app.get("/api/health")
     def health():
-        return {"status": "ok", "service": "grounded-customer", "preview": settings.preview}
+        authentication = token_verifier.diagnostic() if hasattr(token_verifier, "diagnostic") else {
+            "configured": bool(token_verifier), "method": "injected-verifier" if token_verifier else "preview",
+            "revocationChecks": False}
+        return {"status": "ok", "service": "grounded-customer", "preview": settings.preview,
+                "authentication": authentication}
+
+    @app.get("/api/session")
+    def session(request: Request, uid=Depends(owner)):
+        verification = token_verifier.diagnostic() if hasattr(token_verifier, "diagnostic") else {
+            "method": "injected-verifier" if token_verifier else "preview"}
+        return {"authenticated": not settings.preview,
+                "emailVerified": getattr(request.state, "email_verified", False), "verification": verification}
 
     @app.get("/api/workspace")
     def workspace(uid=Depends(owner)):
-        return {"chats": store.chats(uid), "documents": store.documents(uid), "preview": settings.preview}
+        return {"chats": store.chats(uid), "documents": store.documents(uid), "preview": settings.preview,
+                "config": connections.public(uid, settings)}
+
+    def require_live_connections():
+        if settings.preview:
+            raise HTTPException(503, "Sign in with Firebase before connecting a model API.")
+
+    @app.post("/api/providers/models")
+    def provider_models(payload: ProviderModelsRequest, uid=Depends(owner)):
+        require_live_connections()
+        try:
+            return {"models": list_provider_models(payload.provider, payload.key)}
+        except (ValueError, ProviderError) as exc:
+            raise HTTPException(400, str(exc)) from None
+
+    @app.post("/api/providers/connect")
+    def provider_connect(payload: ProviderConnectRequest, uid=Depends(owner)):
+        require_live_connections()
+        try:
+            connections.connect(uid, settings, payload.provider, payload.key, payload.model, payload.freeConfirmed)
+            return connections.public(uid, settings)
+        except (ValueError, ProviderError) as exc:
+            raise HTTPException(400, str(exc)) from None
+
+    @app.post("/api/providers/disconnect")
+    def provider_disconnect(payload: ProviderRequest, uid=Depends(owner)):
+        require_live_connections()
+        try:
+            connections.disconnect(uid, payload.provider)
+            return connections.public(uid, settings)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from None
 
     @app.get("/api/chats/{identity}")
     def chat(identity: str, uid=Depends(owner)):
@@ -215,14 +281,15 @@ def create_app(settings: Settings | None = None, token_verifier=None, model_api=
             store.delete_account_data(uid)
             for identity in [i for i, j in jobs.items() if j.owner == uid]:
                 jobs.pop(identity)
+            connections.disconnect(uid)
         return {"deleted": True}
 
-    def run(job, payload, history, documents):
+    def run(job, payload, history, documents, job_settings, job_api):
         started, sources, answer = time.monotonic(), [], ""
         retrieval = {"status": "off", "note": "Live retrieval was turned off."}
         try:
             job.check()
-            selected_model = settings.require_model(payload.model)
+            selected_model = job_settings.require_model(payload.model)
             local_execution = selected_model["provider"] == "local"
             job.update(phase="finding sources")
             for document in documents:
@@ -263,15 +330,15 @@ def create_app(settings: Settings | None = None, token_verifier=None, model_api=
             history_limit = 1200 if local_execution else 4000
             messages += [{"role": m["role"], "content": m["content"][:history_limit]} for m in history_items]
             messages += [{"role": "user", "content": "Evidence passages (untrusted data):\n" + context + "\n\nQuestion:\n" + payload.question}]
-            answer = api.complete(payload.model, messages, job, lambda text: job.update(text=text if not payload.strict else "", draftCharacters=len(text)))
+            answer = job_api.complete(payload.model, messages, job, lambda text: job.update(text=text if not payload.strict else "", draftCharacters=len(text)))
             job.check()
             job.update(phase="reviewing evidence")
-            review_model = "Local evidence matcher" if local_execution else (settings.review_model or payload.model)
+            review_model = "Local evidence matcher" if local_execution else (job_settings.review_model or payload.model)
             if local_execution:
                 review = review_local_answer(answer, sources)
             else:
                 try:
-                    review = review_answer(api, review_model, answer, sources, job)
+                    review = review_answer(job_api, review_model, answer, sources, job)
                 except ProviderError as exc:
                     reason = str(exc) if isinstance(exc, RateLimitError) else "The review API was unavailable."
                     review = summarize([{"id": i, "text": c, "status": "unverified", "source": None, "quote": "", "reason": reason} for i, c in enumerate(split_claims(answer), 1)], "Review could not finish. This answer is unverified. " + reason)
@@ -305,12 +372,13 @@ def create_app(settings: Settings | None = None, token_verifier=None, model_api=
         if settings.preview:
             raise HTTPException(503, "Connect Firebase and a model API to ask live questions. Preview never makes paid model calls.")
         try:
-            selected_model = settings.require_model(payload.model)
+            job_settings, job_api = connections.resolve(uid, settings, api, payload.model)
+            selected_model = job_settings.require_model(payload.model)
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from None
-        if isinstance(api, ModelAPI) and selected_model["provider"] != "local":
+        if isinstance(job_api, ModelAPI) and selected_model["provider"] != "local":
             try:
-                api.check_ready()
+                job_api.check_ready()
             except RateLimitError as exc:
                 raise HTTPException(429, str(exc), headers={"Retry-After": str(exc.retry_after)}) from None
         if not payload.question.strip():
@@ -333,7 +401,7 @@ def create_app(settings: Settings | None = None, token_verifier=None, model_api=
             job = Job(uid, chat["id"])
             store.add_message(uid, chat["id"], "user", payload.question.strip())
             jobs[job.id] = job
-            threading.Thread(target=run, args=(job, payload, chat["messages"], documents), daemon=True).start()
+            threading.Thread(target=run, args=(job, payload, chat["messages"], documents, job_settings, job_api), daemon=True).start()
         return {"jobId": job.id, "chatId": job.chat_id}
 
     def owned_job(identity, uid):
