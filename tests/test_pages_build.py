@@ -9,6 +9,8 @@ def test_pages_build_contains_actual_workspace_not_showcase(tmp_path):
     html = (target / "index.html").read_text(encoding="utf-8")
     assert 'id="google-login"' in html
     assert 'id="models-button"' in html
+    assert 'id="model-library-button"' in html
+    assert 'id="model-select-shell"' in html
     assert 'id="composer"' in html
     assert 'id="answer-insights"' in html
     assert 'src="./assets/browser-runtime.js"' in html

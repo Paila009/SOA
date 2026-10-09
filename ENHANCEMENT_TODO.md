@@ -8,6 +8,17 @@ after tests pass.
 
 The customer entry point now serves installed local models and optional API models in one viewer; the older research dashboard is preserved only for specialist experiment controls.
 
+### Public model-picker repair — 2026-10-09
+
+- [x] Replace the disabled empty composer selector with a visible, actionable Choose model button; retain the native selector when executable models are connected.
+- [x] Add direct Groq, Gemini, and OpenRouter connection shortcuts and display connected API models beside installed localhost models in the workspace toolbar.
+- [x] Focus provider shortcuts on their own connection form; keep official local-model downloads clearly separate from executable browser models.
+- [x] Explain that refreshing Pages clears temporary keys, not saved chats/reviews; never copy the owner's local API secret into public assets.
+- [x] Lock connection controls during submission/generation, clear credentials when switching provider, and discard outdated catalog responses.
+- [x] Preserve existing grounded-guard controls, searched passages, claim reasons, and clickable historical analysis with regression tests.
+
+Verification: the full Python suite passes 104 tests and the frontend/runtime suite passes 45 JavaScript tests. Coverage includes the public model-picker paths, provider changes, stale dialog requests, and prior monitoring/history behavior. Publishing uses the existing Pages workflow; live public provider generation and interactive browser/OAuth acceptance remain separate, unverified checks.
+
 ### Usable public workspace and session repair — 2026-10-09
 
 - [x] Verify Firebase token signatures, audience, issuer, subject, and timestamps against Google's signed public certificates without requiring an Admin credential for ordinary login.

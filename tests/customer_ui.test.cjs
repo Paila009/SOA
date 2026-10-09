@@ -313,3 +313,200 @@ test('visible toolbar and monitor buttons are wired to actual model and guard ch
   assert.equal(h.run('state.search'),false);
   assert.equal(h.element('search-toggle').child.textContent,'Sources off');
 });
+
+const publicCatalog=`state.config={preview:false,browser:true,models:[],localModels:[
+  {id:'qwen2.5-1.5b',chatId:'local:qwen2.5-1.5b',name:'Qwen2.5 1.5B Instruct',parameters:'1.54B',quantization:'Q4_K_M',license:'Apache-2.0',installed:false,downloadUrl:'https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF'},
+  {id:'phi-3-mini',chatId:'local:phi-3-mini',name:'Phi-3 Mini 3.8B',parameters:'3.8B',quantization:'Q4_K_M',license:'MIT',installed:false,downloadUrl:'https://huggingface.co/microsoft/Phi-3-mini-4k-instruct-gguf'}
+],providers:[
+  {id:'groq',name:'Groq',enabled:true,ready:false},
+  {id:'gemini',name:'Google Gemini',enabled:true,ready:false},
+  {id:'openrouter',name:'OpenRouter',enabled:true,ready:false}
+]};`;
+
+test('empty Pages model selection has an actionable library button, not a dead dropdown',()=>{
+  const h=harness({GROUNDED_DEPLOYMENT:{mode:'browser'}});
+  h.run(`${publicCatalog}renderModels()`);
+  assert.match(html,/id="model-library-button"[^>]*type="button"|type="button"[^>]*id="model-library-button"/);
+  assert.equal(h.element('model').hidden,true);
+  assert.equal(h.element('model').disabled,true);
+  assert.equal(h.element('model').value,'');
+  assert.equal(h.element('model-library-button').hidden,false);
+  assert.equal(h.element('model-library-button').disabled,false);
+  assert.match(h.element('model-library-button').textContent,/Choose model/);
+  const toolbar=h.element('runtime-modelbar').innerHTML;
+  for(const provider of ['groq','gemini','openrouter'])
+    assert.match(toolbar,new RegExp(`data-connect-provider="${provider}"`));
+  assert.match(toolbar,/data-open-local-models/);
+  assert.doesNotMatch(toolbar,/data-use-model="local:|installed models/);
+});
+
+test('ready API models are visible in Pages toolbar and keep native selection usable',()=>{
+  const h=harness({GROUNDED_DEPLOYMENT:{mode:'browser'}});
+  h.run(`${publicCatalog}state.config.models=[
+    {id:'groq:fixture-model',model:'Fixture Groq Model',provider:'groq',providerName:'Groq'},
+    {id:'gemini:fixture-model',model:'Fixture Gemini Model',provider:'gemini',providerName:'Google Gemini'}
+  ];state.config.providers[0].ready=true;state.config.providers[1].ready=true;renderModels()`);
+  assert.equal(h.element('model').hidden,false);
+  assert.equal(h.element('model').disabled,false);
+  assert.equal(h.element('model').value,'groq:fixture-model');
+  assert.equal(h.element('model-library-button').disabled,false);
+  assert.match(h.element('model-library-button').textContent,/Models/);
+  const toolbar=h.element('runtime-modelbar').innerHTML;
+  assert.match(toolbar,/data-use-model="groq:fixture-model"/);
+  assert.match(toolbar,/data-use-model="gemini:fixture-model"/);
+  assert.match(toolbar,/Fixture Groq Model/);
+  assert.match(toolbar,/Fixture Gemini Model/);
+  assert.match(toolbar,/data-connect-provider="openrouter"/);
+  assert.doesNotMatch(toolbar,/data-connect-provider="groq"/);
+  h.run("chooseModel('gemini:fixture-model')");
+  assert.equal(h.element('model').value,'gemini:fixture-model');
+  assert.equal(h.stored.get('grounded:model'),'gemini:fixture-model');
+});
+
+test('Pages local catalog stays download-only and is never selected for browser chat',()=>{
+  const h=harness({GROUNDED_DEPLOYMENT:{mode:'browser'}});
+  h.stored.set('grounded:model','local:qwen2.5-1.5b');
+  h.run(`${publicCatalog}renderModels();showModels('local')`);
+  assert.equal(h.run('state.model'),'');
+  assert.match(h.context.capture.content,/Qwen2\.5 1\.5B Instruct/);
+  assert.match(h.context.capture.content,/Phi-3 Mini 3\.8B/);
+  assert.match(h.context.capture.content,/Download model weights/);
+  assert.match(h.context.capture.content,/Download local app/);
+  assert.doesNotMatch(h.context.capture.content,/data-use-model="local:|Ready in this chat|installed local models still work/);
+  assert.match(h.context.capture.content,/cannot detect or run models downloaded|does not run.*browser|not run.*browser|cannot run.*browser/i);
+  // A stale server-shaped installation flag must not imply browser execution.
+  h.run("state.config.localModels[0].installed=true;showModels('local')");
+  assert.doesNotMatch(h.context.capture.content,/data-use-model="local:|Ready in this chat/);
+});
+
+test('reloading Pages without remembered keys keeps all provider connect paths accessible',async()=>{
+  const {createRuntime}=require('../customer/web/browser-runtime.js');
+  const runtime=createRuntime({store:{get:async()=>undefined,set:async()=>{},delete:async()=>{}}});
+  const h=harness({GROUNDED_DEPLOYMENT:{mode:'browser'},GroundedBrowserRuntime:runtime});
+  const config=await h.run("api('/api/config')");
+  assert.equal(config.models.length,0);
+  h.context.reloadedConfig=config;
+  h.run("state.config=reloadedConfig;state.model='groq:stale-choice';renderModels()");
+  assert.equal(h.element('model').hidden,true);
+  assert.equal(h.element('model-library-button').disabled,false);
+  assert.equal(h.run('state.model'),'');
+  assert.ok(config.localModels.length>0);
+  assert.ok(config.localModels.every(model=>!model.installed));
+  const toolbar=h.element('runtime-modelbar').innerHTML;
+  for(const provider of ['groq','gemini','openrouter'])
+    assert.match(toolbar,new RegExp(`data-connect-provider="${provider}"`));
+});
+
+test('composer and provider shortcuts open the library with the intended focus',()=>{
+  const h=harness({GROUNDED_DEPLOYMENT:{mode:'browser'},matchMedia:()=>({addEventListener(){}})});
+  h.context.document.querySelectorAll=()=>[];
+  h.context.document.addEventListener=()=>{};
+  h.run(`${publicCatalog}renderModels();showModels=(focus=null)=>{capture={focus};};bindEvents()`);
+  h.element('model-library-button').onclick();
+  assert.equal(h.context.capture.focus,null);
+  const toolbarClick=dataset=>h.element('runtime-modelbar').onclick({target:{closest:()=>({dataset,hasAttribute:name=>name==='data-open-local-models'&&!dataset.connectProvider})}});
+  for(const provider of ['groq','gemini','openrouter']){
+    toolbarClick({connectProvider:provider});
+    assert.equal(h.context.capture.focus,provider);
+  }
+  toolbarClick({});
+  assert.equal(h.context.capture.focus,'local');
+});
+
+test('opening model connections is locked while an answer submission is in flight',()=>{
+  const h=harness({GROUNDED_DEPLOYMENT:{mode:'browser'},matchMedia:()=>({addEventListener(){}})});
+  h.context.document.querySelectorAll=()=>[];
+  h.context.document.addEventListener=()=>{};
+  h.run(`${publicCatalog}state.submitting=true;renderModels();bindEvents()`);
+  assert.equal(h.element('model-library-button').disabled,true);
+  assert.match(h.element('runtime-modelbar').innerHTML,/data-connect-provider="groq"[^>]*disabled/);
+  assert.match(h.element('runtime-modelbar').innerHTML,/data-open-local-models[^>]*disabled/);
+  h.element('model-library-button').onclick();
+  assert.equal(h.context.capture,null);
+  h.element('runtime-modelbar').onclick({target:{closest:()=>({dataset:{connectProvider:'groq'},hasAttribute:()=>false})}});
+  assert.equal(h.context.capture,null);
+});
+
+test('a provider shortcut opens the correct connection form, not the generic catalogue top',()=>{
+  const h=harness({GROUNDED_DEPLOYMENT:{mode:'browser'}});
+  h.run(`${publicCatalog}showModels('gemini')`);
+  assert.equal(h.context.capture.title,'Connect Google Gemini.');
+  assert.equal(h.element('provider-choice').value,'gemini');
+  assert.match(h.context.capture.content,/id="provider-connect-heading">Connect Google Gemini/);
+  assert.match(h.context.capture.content,/id="provider-key" type="password"/);
+  h.run("showModels('openrouter')");
+  assert.equal(h.context.capture.title,'Connect OpenRouter.');
+  assert.equal(h.element('provider-choice').value,'openrouter');
+  // Native DOM click events passed by older sidebar hooks are not provider IDs.
+  h.run("showModels({type:'click',target:{}})");
+  assert.equal(h.context.capture.title,'Your model library.');
+  assert.equal(h.element('provider-choice').value,'groq');
+});
+
+test('changing provider resets stale key, model selection and free-plan confirmation',async()=>{
+  const h=harness({GROUNDED_DEPLOYMENT:{mode:'browser'}});
+  h.run(`${publicCatalog}showModels('groq')`);
+  h.element('provider-key').value='fixture-key-never-real';
+  h.element('free-confirm').checked=true;
+  h.element('provider-model').innerHTML='<option value="fixture-groq-model">Fixture Groq Model</option>';
+  h.element('provider-model').disabled=false;
+  h.element('connect-provider').disabled=false;
+  await h.element('modal-content').onclick({target:{closest:selector=>selector==='[data-connect-provider]'?{dataset:{connectProvider:'gemini'}}:null}});
+  assert.equal(h.element('provider-choice').value,'gemini');
+  assert.equal(h.element('provider-key').value,'');
+  assert.equal(h.element('free-confirm').checked,false);
+  assert.equal(h.element('provider-model').disabled,true);
+  assert.equal(h.element('connect-provider').disabled,true);
+  assert.match(h.element('provider-connect-heading').textContent,/Google Gemini/);
+});
+
+test('native provider choice clears credentials and rejects an old in-flight catalog',async()=>{
+  const h=harness({GROUNDED_DEPLOYMENT:{mode:'browser'}});
+  h.run(`${publicCatalog}showModels('groq');api=()=>new Promise(resolve=>{globalThis.releaseCatalog=resolve;})`);
+  h.element('provider-key').value='fixture-key-never-real';
+  h.element('free-confirm').checked=true;
+  const loading=h.element('load-provider-models').onclick();
+  h.element('provider-choice').value='gemini';
+  h.element('provider-choice').onchange();
+  assert.equal(h.element('provider-key').value,'');
+  assert.equal(h.element('free-confirm').checked,false);
+  h.run("releaseCatalog({models:[{id:'old-groq-fixture',name:'Old Groq fixture'}]})");
+  await loading;
+  assert.equal(h.element('provider-model').disabled,true);
+  assert.equal(h.element('connect-provider').disabled,true);
+  assert.doesNotMatch(h.element('provider-model').innerHTML,/old-groq-fixture/);
+  assert.match(h.element('provider-connect-heading').textContent,/Google Gemini/);
+});
+
+test('catalog response from a previous model modal cannot populate a reopened one',async()=>{
+  const h=harness({GROUNDED_DEPLOYMENT:{mode:'browser'}});
+  h.run(`${publicCatalog}showModels('groq');api=()=>new Promise(resolve=>{globalThis.releaseCatalog=resolve;})`);
+  h.element('provider-key').value='fixture-key-never-real';
+  const loading=h.element('load-provider-models').onclick();
+  h.run("showModels('gemini')");
+  h.element('provider-model').innerHTML='<option value="">Load the provider’s model list first</option>';
+  h.element('provider-model').disabled=true;
+  h.element('connect-provider').disabled=true;
+  h.element('provider-feedback').textContent='';
+  h.element('load-provider-models').disabled=true;
+  h.run("releaseCatalog({models:[{id:'old-groq-fixture',name:'Old Groq fixture'}]})");
+  await loading;
+  assert.equal(h.element('provider-choice').value,'gemini');
+  assert.equal(h.element('provider-model').disabled,true);
+  assert.equal(h.element('connect-provider').disabled,true);
+  assert.equal(h.element('load-provider-models').disabled,true);
+  assert.doesNotMatch(h.element('provider-model').innerHTML,/old-groq-fixture/);
+  assert.equal(h.element('provider-feedback').textContent,'');
+});
+
+test('catalog completion after another dialog replaces Models never accesses removed controls',async()=>{
+  const h=harness({GROUNDED_DEPLOYMENT:{mode:'browser'}});
+  h.run(`${publicCatalog}showModels('groq');api=()=>new Promise(resolve=>{globalThis.releaseCatalog=resolve;})`);
+  h.element('provider-key').value='fixture-key-never-real';
+  const loading=h.element('load-provider-models').onclick();
+  const originalLookup=h.context.document.getElementById;
+  h.context.document.getElementById=id=>id==='provider-form'?null:
+    id.startsWith('provider-')||id==='connect-provider'||id==='load-provider-models'?(()=>{throw new Error('Removed provider control accessed');})():originalLookup(id);
+  h.run("releaseCatalog({models:[{id:'old-groq-fixture',name:'Old Groq fixture'}]})");
+  await assert.doesNotReject(loading);
+});
