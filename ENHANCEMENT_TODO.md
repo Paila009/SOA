@@ -25,7 +25,19 @@ The public browser workspace uses each user's own in-memory key directly with th
 
 Integrated verification: 104 Python tests and 25 JavaScript frontend/runtime tests passed, including actual Pages asset construction, signed-token rejection, account isolation, current catalog/key checks, key redaction, streaming, timeouts/Stop, harmless greetings in reviewed-only mode, and selecting historical answer reviews. Real installed Qwen2.5 answered “What is cricket?” with the supplied passage in 0.91 seconds and its review linked that exact passage. Live Wikipedia retrieval returned sources. Browser CORS preflight checks succeeded for all three API providers. Provider generation tests use mocked responses because no real personal key was supplied. Windows visual/browser automation failed to start, so no visual or real OAuth acceptance claim is made.
 
-### Free-tier live chat — 2026-10-09
+### Restored monitoring and downloaded-model visibility — 2026-10-09
+
+- [x] Keep Grounded guard, source-search controls, review method, and selected runtime visible before the first answer, with honest waiting states instead of fabricated risk percentages.
+- [x] Show all installed local models as direct workspace buttons and group downloaded/connected API models in the composer selector; fall back safely from an obsolete saved selection.
+- [x] Keep localhost on its Python backend even if an old Pages deployment flag is present, request uncached configuration, and add Refresh models.
+- [x] Show actual source passages during generation and preserve supported, conflicting, and unverified claims, their reasons, and exact passages in each saved answer review.
+- [x] Keep source and claim previews accessible on narrow screens instead of hiding them; preserve the composer outside the scrolling conversation.
+- [x] Keep manually selected historical analysis visible during polling and provide Back to live monitor.
+- [x] Lock model/guard changes during initial submission as well as generation, and recover the composer after a reported failure.
+
+Local verification: 104 Python tests and 34 JavaScript frontend/runtime tests pass. All three installed models appear in `/api/config`; health, HTML, and app assets respond successfully with the model toolbar and persistent monitoring controls. Browser automation still fails at startup (`helper_unknown_error`), so a visual acceptance check is not claimed. The owner subsequently requested publishing these canonical frontend changes through the existing GitHub Pages workflow; downloaded-model execution still requires localhost.
+
+### Free-tier live chat checklist — 2026-10-09
 
 - [x] Gate Groq, Gemini, and OpenRouter behind explicit free-only owner confirmations; require OpenRouter model IDs to end in `:free` and provide no automatic paid fallback.
 - [x] Remove the stale automatic model default; require a current model ID from the owner's Free Plan console.

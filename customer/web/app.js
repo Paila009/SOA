@@ -32,8 +32,11 @@ const safeLink = (url) => {
     return u.protocol === 'https:' || loopback ? esc(u.href) : '';
   } catch { return ''; }
 };
-const state = { config:null, user:null, auth:null, firebase:null, chats:[], documents:[], selectedDocs:new Set(), chat:null, job:null, search:true, strict:false, mode:'research', model:'', review:null, reviewTab:'claims', signup:false, creatingAccount:false, epoch:0, analysisMessageId:null, sessionError:null };
-const browserDeployment = globalThis.GROUNDED_DEPLOYMENT?.mode === 'browser';
+const state = { config:null, user:null, auth:null, firebase:null, chats:[], documents:[], selectedDocs:new Set(), chat:null, job:null, submitting:false, search:true, strict:false, mode:'research', model:'', review:null, reviewTab:'claims', signup:false, creatingAccount:false, epoch:0, analysisMessageId:null, sessionError:null, monitorProgress:null, monitorFocus:'live' };
+const executionHost = typeof location==='undefined'?'':location.hostname.toLowerCase();
+const loopbackExecution = ['localhost','127.0.0.1','::1','[::1]'].includes(executionHost) || executionHost.endsWith('.localhost');
+// A Pages flag must never override the installed-model backend on localhost.
+const browserDeployment = globalThis.GROUNDED_DEPLOYMENT?.mode === 'browser' && !loopbackExecution;
 let browserRuntime;
 let toastTimer;
 function toast(message) { $('toast').textContent=message; $('toast').hidden=false; clearTimeout(toastTimer); toastTimer=setTimeout(() => { $('toast').hidden=true; },5500); }
@@ -57,7 +60,7 @@ async function api(path, options={}, allowRefresh=true) {
   const timer=setTimeout(()=>controller.abort(),timeoutMs);
   delete request.timeoutMs;
   let response;
-  try { response=await fetch(path,{...request,headers,credentials:'same-origin',signal:controller.signal}); }
+  try { response=await fetch(path,{...request,headers,cache:'no-store',credentials:'same-origin',signal:controller.signal}); }
   catch(err){
     if(err?.name==='AbortError')throw new Error('The server took too long to respond. Your conversation is safe; try again.');
     throw err;
@@ -83,7 +86,8 @@ function openModal(title, content, eyebrow='YOUR WORKSPACE', variant='default') 
 function closeSidebar() { $('sidebar').classList.remove('open'); $('sidebar-shade').hidden=true; $('menu-button').setAttribute('aria-expanded','false'); $('sidebar').inert=matchMedia('(max-width:760px)').matches; document.querySelector('.main').inert=false; }
 function showAuth(force=false) { if(state.user && !state.config.preview && !force){showWorkspace();return;} closeSidebar(); $('workspace').hidden=true; $('auth-page').hidden=false; $('auth-back').hidden=!state.config.preview; $('email').focus(); }
 function showWorkspace() { $('auth-page').hidden=true; $('workspace').hidden=false; }
-function preventWhileRunning() { if (!state.job) return false; toast('Stop the current answer before changing conversations.'); return true; }
+function isRunning() { return !!state.job || state.submitting; }
+function preventWhileRunning() { if (!isRunning()) return false; toast('Wait for or stop the current answer before changing models or settings.'); return true; }
 
 async function refreshWorkspace() {
   const epoch=state.epoch;
@@ -98,12 +102,28 @@ async function refreshWorkspace() {
 function renderModels() {
   const models=state.config.models || [], saved=state.model || storage.get('grounded:model');
   $('model-count').textContent=models.filter(m=>m.provider!=='local').length+(state.config.localModels?.length || 0);
-  $('model').innerHTML=models.length?models.map(m=>`<option value="${esc(m.id)}">${esc(m.model)} · ${esc(m.providerName)}</option>`).join(''):'<option value="">Connect a model in Models</option>';
-  if(models.some(m=>m.id===saved))$('model').value=saved;
+  const local=models.filter(m=>m.provider==='local'), remote=models.filter(m=>m.provider!=='local');
+  const options=(items)=>items.map(m=>`<option value="${esc(m.id)}">${esc(m.model)} · ${esc(m.providerName)}</option>`).join('');
+  $('model').innerHTML=models.length?`${local.length?`<optgroup label="Downloaded models · this computer">${options(local)}</optgroup>`:''}${remote.length?`<optgroup label="Connected API models">${options(remote)}</optgroup>`:''}`:'<option value="">Connect a model in Models</option>';
+  $('model').value=models.some(m=>m.id===saved)?saved:(local[0]?.id || models[0]?.id || '');
   state.model=$('model').value;
-  $('model').disabled=!!state.job || state.config.preview || !models.length;
+  $('model').disabled=isRunning() || state.config.preview || !models.length;
   $('connection-label').textContent=state.sessionError?'Workspace unavailable':state.config.preview?'Preview':models.length?'Ready to research':'Connect a model';
   $('workspace-status').title=state.sessionError || (models.length?'Choose a model and ask a question':'Open Models to connect your own API key');
+  const bar=$('runtime-modelbar');
+  if(bar){bar.innerHTML=`<span class="runtime-label">${icon(browserDeployment?'globe':'layers')} ${browserDeployment?'Browser · API chat':'This computer'}${local.length?` · ${local.length} installed models`:''}</span>${local.map(m=>`<button class="runtime-model ${m.id===state.model?'selected':''}" data-use-model="${esc(m.id)}" ${isRunning()?'disabled':''}>${esc(m.model)}</button>`).join('')}<button class="runtime-model runtime-library" data-open-models>All models ${icon('chevron')}</button><button class="runtime-model" data-refresh-models ${isRunning()?'disabled':''}>Refresh models</button>`;}
+  renderInsights();
+}
+
+function chooseModel(identity) {
+  if(preventWhileRunning())return;
+  if(!state.config.models?.some(m=>m.id===identity)){toast('This model is not currently ready in this workspace. Refresh Models to check its installation.');return;}
+  state.model=identity;storage.set('grounded:model',identity);renderModels();$('question').focus();
+}
+
+async function refreshModels() {
+  if(preventWhileRunning())return;
+  try{const config=await api('/api/config');state.config={...state.config,...config};if(state.user)await refreshWorkspace();renderModels();const models=state.config.models || [];toast(browserDeployment?`${models.length} connected API models available in this tab.`:`${models.filter(m=>m.provider==='local').length} installed local models available here.`);}catch(err){toast(err.message);}
 }
 
 function renderHistory() {
@@ -140,9 +160,19 @@ function renderInsights(message=null) {
   if(!panel || !scroll)return;
   const answers=(state.chat?.messages || []).filter(m=>m.role==='assistant');
   const selected=message || answers.find(m=>m.id===state.analysisMessageId) || answers[answers.length-1];
-  panel.hidden=!selected;
-  scroll.classList.toggle('has-insights',!!selected);
-  if(!selected){panel.innerHTML='';state.analysisMessageId=null;return;}
+  panel.hidden=false;
+  scroll.classList.toggle('has-insights',true);
+  const model=(state.config?.models || []).find(m=>m.id===(state.model || $('model')?.value));
+  const modelName=model?.model || model?.name || 'Select a model';
+  const execution=model?(String(model.provider).startsWith('local')?'Local model · this device':`${model.providerName || model.provider} API`):'No runtime selected';
+  const setup=(method)=>`<section class="insights-monitor"><div class="insights-section-title"><h3>${icon('settings')} Monitoring setup</h3><span>Next answer</span></div><button class="monitor-toggle" data-monitor-search type="button" aria-pressed="${!!state.search}" ${isRunning()?'disabled':''}><span>${icon('globe')} Searched resources</span><strong>${state.search?'Sources on':'Sources off'}</strong></button><button class="monitor-toggle" data-monitor-guard type="button" aria-pressed="${!!state.strict}" ${isRunning()?'disabled':''}><span>${icon('shield')} Grounded guard</span><strong>${state.strict?'Reviewed only':'Full answer + review'}</strong></button><div class="monitor-runtime"><span>Selected model</span><strong>${esc(modelName)}</strong><small>${esc(execution)}</small><span>Review method</span><small>${esc(method || (isRunning()?'Review follows generation.':'Not measured yet · claim review follows an answer.'))}</small></div><p class="monitor-explanation">${state.strict?'Reviewed-only mode waits for evidence review, then filters weakly supported claims.':'Full-answer mode shows the draft, then attaches a claim-by-claim evidence review.'} This is evidence screening, not a guarantee of truth.</p></section>`;
+  const progress=state.monitorProgress || {}, live=isRunning()&&state.monitorFocus!=='saved'&&!message;
+  if(!selected || live){
+    if(!selected)state.analysisMessageId=null;
+    const sources=live?(progress.sources || []):[], phase=live?(progress.phase || 'Getting started'):'Ready for your question';
+    panel.innerHTML=`<header class="insights-heading"><div><span class="eyebrow">LIVE EVIDENCE MONITOR</span><h2>Answer insights.</h2></div><span class="insights-verdict ${live?'attention':'waiting'}">${live?'In progress':'Waiting'}</span></header>${setup()}<section class="insights-signal attention"><span class="insights-signal-icon">${icon('shield')}</span><div><strong>${live?'Grounded check in progress':'Grounded check · waiting'}</strong><p>${live?`${esc(phase)}. Risk and claim verdicts are not measured until review finishes.`:'Ask a question first. The guard action, source passages, and claim reasons will appear here.'}</p></div></section><div class="insights-metrics"><div><span>Evidence coverage</span><strong>—</strong><small>No completed review</small></div><div><span>Supported / conflicting</span><strong>— / —</strong><small>Not measured yet</small></div><div><span>Unverified claims</span><strong>—</strong><small>Not measured yet</small></div><div><span>Grounded guard</span><strong class="insights-metric-text">${state.strict?'Reviewed only':'Full answer + review'}</strong><small>Display policy, not a result</small></div></div><section class="insights-section insights-sources"><div class="insights-section-title"><h3>${icon('file')} Searched resources</h3><span>${sources.length?`${sources.length} passages`:'Waiting'}</span></div><p class="insights-section-note">${esc(progress.retrieval?.note || (live?'Retrieval progress appears when the search finishes.':'Source titles, links, and the actual reviewed passages appear after your question.'))}</p>${sources.length?sources.slice(0,4).map(s=>{const url=safeLink(s.url);return `<article class="insights-source">${url?`<a href="${url}" target="_blank" rel="noopener noreferrer">[${esc(s.id)}] ${esc(s.title)} ↗</a>`:`<strong>[${esc(s.id)}] ${esc(s.title)}</strong>`}<small>${esc(s.provider || 'Retrieved passage')}</small><p>${esc(String(s.snippet || '').slice(0,220))}${String(s.snippet || '').length>220?'…':''}</p></article>`;}).join(''):`<p class="insights-empty">${live?'No retrieved passages have been reported yet.':'No search has been run yet.'}</p>`}</section><footer class="insights-limit">Conflicting evidence and missing evidence are different. An unverified claim is not automatically false. No hallucination probability is measured here.</footer>`;
+    return;
+  }
   state.analysisMessageId=selected.id;
   const d=selected.detail || {}, review=d.review || {}, counts=review.counts || {}, sources=d.sources || [], claims=review.claims || [];
   const supported=counts.supported || 0, contradicted=counts.contradicted || 0, unverified=counts.unverified || 0, inspect=contradicted+unverified;
@@ -156,10 +186,10 @@ function renderInsights(message=null) {
   const visibleClaims=[...claims].sort((a,b)=>(claimOrder[a.status]??4)-(claimOrder[b.status]??4)).slice(0,3);
   panel.innerHTML=`<header class="insights-heading"><div><span class="eyebrow">BEHIND THE ANSWER</span><h2>Answer insights.</h2></div><span class="insights-verdict ${tone}">${esc(verdict)}</span></header>
     <div class="insights-selected"><span>Selected answer · ${esc(timeLabel(selected.created))}</span><p>${esc(d.question || state.chat?.title || 'Saved answer')}</p>${d.sample?'<span class="sample-badge">Illustrative sample · not a measured result</span>':''}</div>
-    <section class="insights-signal ${tone}"><span class="insights-signal-icon">${icon('shield')}</span><div><strong>Evidence risk signal</strong><p>${esc(risk)}</p></div></section>
+    ${setup(review.method)}<section class="insights-signal ${tone}"><span class="insights-signal-icon">${icon('shield')}</span><div><strong>Grounded check · evidence risk signal</strong><p>${esc(risk)}</p></div></section>
     <div class="insights-metrics"><div><span>Evidence coverage</span><strong>${coverage===null?'N/A':`${Math.round(coverage)}%`}</strong><small>Cited factual claims · not accuracy</small></div><div><span>Claims to inspect</span><strong>${inspect}</strong><small>${contradicted} conflicting · ${unverified} unverified</small></div><div><span>Guard action</span><strong class="insights-metric-text">${esc(guard)}</strong><small>${d.strict?'Reviewed-only display':'Original answer visible'}</small></div><div><span>Response time</span><strong class="insights-metric-text">${Number.isFinite(d.elapsed)?`${d.elapsed.toFixed(1)} s`:'Not recorded'}</strong><small>Retrieval + generation + review</small></div></div>
-    <div class="insights-controls"><button class="review-button" data-review="${esc(selected.id)}" data-review-tab="claims">View full analysis ${icon('chevron')}</button><button class="source-button" data-review="${esc(selected.id)}" data-review-tab="sources">Searched sources (${sources.length})</button><button class="source-button" data-review="${esc(selected.id)}" data-review-tab="draft">Review setup</button></div>
-    <section class="insights-section insights-sources"><div class="insights-section-title"><h3>${icon('file')} Searched sources</h3><button class="text-button" data-review="${esc(selected.id)}" data-review-tab="sources">${sources.length} source${sources.length===1?'':'s'} ↗</button></div><p class="insights-section-note">${esc(d.retrieval?.note || 'Exact passages available to this answer.')}</p>${sources.length?sources.slice(0,4).map(s=>`<article class="insights-source"><button data-review="${esc(selected.id)}" data-review-tab="sources">[${esc(s.id)}] ${esc(s.title)} ↗</button><small>${esc(s.provider || 'Retrieved passage')}</small><p>${esc(String(s.snippet || '').slice(0,220))}${String(s.snippet || '').length>220?'…':''}</p></article>`).join(''):'<p class="insights-empty">No source passages were available. A missing source does not mean the answer is false.</p>'}</section>
+    <div class="insights-controls">${isRunning()?'<button class="review-button" data-monitor-live>Back to live monitor</button>':''}<button class="review-button" data-review="${esc(selected.id)}" data-review-tab="claims">View full analysis ${icon('chevron')}</button><button class="source-button" data-review="${esc(selected.id)}" data-review-tab="sources">Searched sources (${sources.length})</button><button class="source-button" data-review="${esc(selected.id)}" data-review-tab="draft">Review setup</button></div>
+    <section class="insights-section insights-sources"><div class="insights-section-title"><h3>${icon('file')} Searched resources</h3><button class="text-button" data-review="${esc(selected.id)}" data-review-tab="sources">${sources.length} source${sources.length===1?'':'s'} ↗</button></div><p class="insights-section-note">${esc(d.retrieval?.note || 'Exact passages available to this answer.')}</p>${sources.length?sources.slice(0,4).map(s=>`<article class="insights-source"><button data-review="${esc(selected.id)}" data-review-tab="sources">[${esc(s.id)}] ${esc(s.title)} ↗</button><small>${esc(s.provider || 'Retrieved passage')}</small><p>${esc(String(s.snippet || '').slice(0,220))}${String(s.snippet || '').length>220?'…':''}</p></article>`).join(''):'<p class="insights-empty">No source passages were available. A missing source does not mean the answer is false.</p>'}</section>
     <section class="insights-section insights-claims"><div class="insights-section-title"><h3>${icon('shield')} Claim review</h3><span>${claims.length} claims</span></div>${visibleClaims.length?visibleClaims.map(c=>{const status=['supported','unverified','contradicted','not_factual'].includes(c.status)?c.status:'unverified';const source=sources.find(s=>String(s.id)===String(c.source));return `<article class="insights-claim ${status}"><span>${esc(status.replace('_',' '))}</span><p>${esc(c.text)}</p><small>${esc(c.reason || 'No reason recorded.')}</small>${c.quote&&source?`<details><summary>Reviewed passage · [${esc(source.id)}] ${esc(source.title)}</summary><blockquote>${esc(c.quote)}</blockquote><button class="text-button" data-review="${esc(selected.id)}" data-review-tab="sources">View source ↗</button></details>`:''}</article>`;}).join(''):'<p class="insights-empty">Claim-level reasons will appear when review finishes.</p>'}${claims.length>3?`<button class="text-button insights-all-claims" data-review="${esc(selected.id)}" data-review-tab="claims">Inspect all ${claims.length} claims ↗</button>`:''}</section>
     <footer class="insights-limit">An unverified claim is not automatically false. Evidence coverage is not a hallucination probability. Select “Why this verdict” on any older answer to see its saved review.</footer>`;
 }
@@ -168,8 +198,11 @@ function selectAnswerAnalysis(messageId) {
   const message=state.chat?.messages.find(m=>m.id===messageId&&m.role==='assistant');
   if(!message)return;
   state.analysisMessageId=messageId;
+  state.monitorFocus='saved';
   renderInsights(message);
 }
+
+function showLiveMonitor() { state.monitorFocus='live';renderInsights(); }
 
 function renderChat(scrollToEnd=false) {
   const chat=state.chat, isChat=!!chat;
@@ -212,21 +245,28 @@ async function loadSample() {
 function showSettings() {
   closeSidebar();
   openModal('Make it yours.', `<p class="preferences-intro">A few small choices for the way you research.</p>
-    <fieldset id="answer-preferences" class="answer-preferences" ${state.job?'disabled':''}><legend>How would you like your answers?</legend>
+    <fieldset id="answer-preferences" class="answer-preferences" ${isRunning()?'disabled':''}><legend>How would you like your answers?</legend>
       <label class="answer-option"><input type="radio" name="answer-display" value="full" ${state.strict?'':'checked'}><span class="preference-icon">${icon('spark')}</span><span class="preference-copy"><strong>Full answer</strong><small>Read as it’s written. Explore the evidence review afterward.</small></span><span class="selection-indicator" aria-hidden="true"></span></label>
       <label class="answer-option"><input type="radio" name="answer-display" value="reviewed" ${state.strict?'checked':''}><span class="preference-icon">${icon('shield')}</span><span class="preference-copy"><strong>Reviewed answer</strong><small>Wait for the review, then filter claims with weak evidence.</small></span><span class="selection-indicator" aria-hidden="true"></span></label>
     </fieldset>
-    <label class="preference-search"><span class="preference-icon">${icon('globe')}</span><span class="preference-copy"><strong>Look for sources</strong><small>Search for background reading with your question.</small></span><input id="preferences-search" type="checkbox" role="switch" ${state.search?'checked':''} ${state.job?'disabled':''}></label>
-    <div class="preferences-footer"><span id="preferences-feedback" role="status">${state.job?'Preferences unlock when this answer finishes.':'Saved in this browser.'}</span><button id="preferences-done" class="primary-button" type="button">Done <span>✓</span></button></div>`, 'PREFERENCES', 'preferences');
-  $('answer-preferences').onchange=(e)=>{if(e.target.name!=='answer-display'||state.job)return;state.strict=e.target.value==='reviewed';storage.set('grounded:strict',String(state.strict));$('preferences-feedback').textContent='Preference saved.';};
-  $('preferences-search').onchange=(e)=>{if(state.job)return;setSearchEnabled(e.target.checked);$('preferences-feedback').textContent='Preference saved.';};
+    <label class="preference-search"><span class="preference-icon">${icon('globe')}</span><span class="preference-copy"><strong>Look for sources</strong><small>Search for background reading with your question.</small></span><input id="preferences-search" type="checkbox" role="switch" ${state.search?'checked':''} ${isRunning()?'disabled':''}></label>
+    <div class="preferences-footer"><span id="preferences-feedback" role="status">${isRunning()?'Preferences unlock when this answer finishes.':'Saved in this browser.'}</span><button id="preferences-done" class="primary-button" type="button">Done <span>✓</span></button></div>`, 'PREFERENCES', 'preferences');
+  $('answer-preferences').onchange=(e)=>{if(e.target.name!=='answer-display'||isRunning())return;setGuardEnabled(e.target.value==='reviewed');$('preferences-feedback').textContent='Preference saved.';};
+  $('preferences-search').onchange=(e)=>{if(isRunning())return;setSearchEnabled(e.target.checked);$('preferences-feedback').textContent='Preference saved.';};
   $('preferences-done').onclick=()=>$('modal').close();
 }
 
 function setSearchEnabled(enabled) {
+  if(preventWhileRunning())return;
   state.search=enabled; storage.set('grounded:search',String(enabled));
   $('search-toggle').classList.toggle('selected',enabled); $('search-toggle').setAttribute('aria-pressed',String(enabled));
   $('search-toggle').querySelector('span:last-child').textContent=enabled?'Sources on':'Sources off';
+  renderInsights();
+}
+
+function setGuardEnabled(enabled) {
+  if(preventWhileRunning())return;
+  state.strict=enabled;storage.set('grounded:strict',String(enabled));renderInsights();
 }
 
 function showModels() {
@@ -251,7 +291,7 @@ function showModels() {
   };
   $('modal-content').onclick=async(e)=>{
     const use=e.target.closest('[data-use-model]'),disconnect=e.target.closest('[data-disconnect-provider]');
-    if(use){if(state.job){toast('Stop the current answer before switching models.');return;}state.model=use.dataset.useModel;renderModels();storage.set('grounded:model',state.model);$('modal').close();$('question').focus();}
+    if(use){if(preventWhileRunning())return;chooseModel(use.dataset.useModel);$('modal').close();}
     if(disconnect){try{state.config={...state.config,...await api('/api/providers/disconnect',{method:'POST',body:{provider:disconnect.dataset.disconnectProvider}})};renderModels();showModels();}catch(err){toast(err.message);}}
   };
 }
@@ -322,10 +362,11 @@ function setBusy(busy) {
   for(const id of ['question','model','mode','search-toggle'])$(id).disabled=busy;
   $('model').disabled=busy||state.config.preview||!state.config.models.length;
   $('composer-status').textContent=busy?'Working through your question…':state.config.preview?'Preview · live chat is not available yet.':'Thoughtful answers. Transparent evidence.';
+  renderModels();
 }
 
 async function submitResearch() {
-  if(state.job)return;
+  if(isRunning())return;
   const question=$('question').value.trim();if(!question){$('question').focus();return;}
   if(state.sessionError){toast(state.sessionError);return;}
   if(state.config.preview || !$('model').value){showChatUnavailable();return;}
@@ -336,14 +377,14 @@ async function submitResearch() {
     $('consent-cancel').onclick=()=>$('modal').close();
     $('consent-send').onclick=()=>{storage.set(`grounded:consent:${state.user.uid}:${model}`,'yes');$('modal').close();submitResearch();};return;
   }
-  setBusy(true);$('send-button').disabled=true;
+  state.submitting=true;state.monitorFocus='live';state.monitorProgress=null;setBusy(true);$('send-button').disabled=true;
   try{
     const result=await api('/api/research',{method:'POST',body:{chatId:state.chat?.sample?null:(state.chat?.id || null),question,model,mode:$('mode').value,search:state.search,strict:state.strict,documents:[...state.selectedDocs],consent:selected?.provider!=='local'}});
     state.job=result;state.chat=await api(`/api/chats/${result.chatId}`);$('question').value='';storage.set(lastChatKey(),result.chatId);renderChat(true);await refreshWorkspace();await pollJob(result);
   }catch(err){
     if(err.status===401){state.sessionError='Your session could not be verified. Sign in again using the account menu.';renderModels();}
     toast(err.message);
-  }finally{state.job=null;setBusy(false);$('send-button').disabled=false;}
+  }finally{state.job=null;state.submitting=false;state.monitorProgress=null;setBusy(false);$('send-button').disabled=false;renderInsights();}
 }
 
 async function pollJob(job) {
@@ -358,6 +399,7 @@ async function pollJob(job) {
     try{
       const result=await api(`/api/jobs/${job.jobId}`,{timeoutMs:10000});failures=0;
       if(epoch!==state.epoch)return;
+      state.monitorProgress=result;renderInsights();
       const scroll=$('content-scroll'), nearBottom=scroll.scrollHeight-scroll.scrollTop-scroll.clientHeight<130;
       const seconds=Math.max(0,Math.round(Date.now()/1000-(result.createdAt || Date.now()/1000)));
       if($('job-phase'))$('job-phase').textContent=result.phase.charAt(0).toUpperCase()+result.phase.slice(1)+`… ${seconds}s`;
@@ -365,7 +407,7 @@ async function pollJob(job) {
       if($('draft-notice'))$('draft-notice').textContent=state.strict?'Draft hidden until its evidence review completes.':'Draft in progress · evidence review follows generation';
       if(nearBottom)scroll.scrollTop=scroll.scrollHeight;
       if(result.done){
-        state.job=null;state.chat=await api(`/api/chats/${job.chatId}`);state.analysisMessageId=null;renderChat(true);await refreshWorkspace();
+        state.job=null;state.monitorProgress=null;state.monitorFocus='saved';state.chat=await api(`/api/chats/${job.chatId}`);state.analysisMessageId=null;renderChat(true);await refreshWorkspace();
         if(result.error){const error=document.createElement('div');error.className='request-error';error.textContent=result.error;$('chat').append(error);toast('The request did not finish. See the message in your conversation.');}
         return;
       }
@@ -428,7 +470,8 @@ function bindEvents(){
   document.querySelectorAll('a.brand').forEach(b=>b.onclick=e=>{e.preventDefault();if(state.user || state.config.preview){showWorkspace();newChat(false);}else showAuth(true);});
   document.querySelectorAll('.starter').forEach(b=>b.onclick=()=>{$('question').value=b.dataset.prompt;$('mode').value=b.dataset.mode;$('question').focus();if(b.dataset.prompt.includes('selected document'))showLibrary();});
   $('search-toggle').onclick=()=>setSearchEnabled(!state.search);
-  $('model').onchange=()=>{state.model=$('model').value;storage.set('grounded:model',state.model);};
+  $('model').onchange=()=>chooseModel($('model').value);
+  $('runtime-modelbar').onclick=e=>{const b=e.target.closest('button');if(!b)return;if(b.dataset.useModel)chooseModel(b.dataset.useModel);else if(b.hasAttribute('data-open-models'))showModels();else if(b.hasAttribute('data-refresh-models'))refreshModels();};
   $('composer').onsubmit=e=>{e.preventDefault();submitResearch();};
   $('question').onkeydown=e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.isComposing){e.preventDefault();submitResearch();}};
   $('stop-button').onclick=async()=>{if(!state.job)return;try{await api(`/api/jobs/${state.job.jobId}/stop`,{method:'POST'});toast('Stopping the response…');}catch(err){toast(err.message);}};
@@ -438,7 +481,7 @@ function bindEvents(){
     if(b.dataset.cite)openReview(b.dataset.message,'sources',b.dataset.cite);
     if(b.dataset.copy){const m=state.chat.messages.find(m=>m.id===b.dataset.copy);if(m){try{await navigator.clipboard.writeText(m.content);toast('Answer copied.');}catch{toast('Clipboard access was denied by the browser.');}}}
   };
-  $('answer-insights').onclick=e=>{const b=e.target.closest('[data-review]');if(b)openReview(b.dataset.review,b.dataset.reviewTab || 'claims');};
+  $('answer-insights').onclick=e=>{const b=e.target.closest('button');if(!b)return;if(b.dataset.review)openReview(b.dataset.review,b.dataset.reviewTab || 'claims');else if(b.hasAttribute('data-monitor-search'))setSearchEnabled(!state.search);else if(b.hasAttribute('data-monitor-guard'))setGuardEnabled(!state.strict);else if(b.hasAttribute('data-monitor-live'))showLiveMonitor();else if(b.hasAttribute('data-open-models'))showModels();};
   $('review-tabs').onclick=e=>{const b=e.target.closest('[data-tab]');if(b){state.reviewTab=b.dataset.tab;renderReview();}};
   $('review-content').onclick=e=>{const b=e.target.closest('[data-source-tab]');if(b)openReview(state.review.id,'sources',b.dataset.sourceTab);};
   $('export-button').onclick=async()=>{if(!state.chat)return;try{const blob=await api(`/api/chats/${state.chat.id}/export`,{asBlob:true});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download='grounded-research.md';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}catch(err){toast(err.message);}};
