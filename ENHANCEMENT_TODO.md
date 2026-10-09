@@ -17,7 +17,7 @@ The customer entry point now serves installed local models and optional API mode
 - [x] Scope provider clients, quota cooldowns, and captured job credentials to the user's connection without mutating the owner's settings or storing keys in saved answers.
 - [x] Return account-specific model configuration with the workspace; redact credential inputs and raw upstream errors.
 - [x] Expose explicit source, claim-verdict, reasoning, and saved-answer analysis controls in the customer interface.
-- [ ] Publish the actual customer interface in GitHub Pages browser mode with Firebase login, personal API connections, evidence review, and per-account IndexedDB history. Publication is verified separately after deployment.
+- [x] Publish the actual customer interface in GitHub Pages browser mode with Firebase login, personal API connections, evidence review, and per-account IndexedDB history. Verified the public HTML contains the composer/analysis panel/browser runtime and all six release assets return HTTP 200 on 2026-10-09.
 - [x] Verify Firebase project configuration lists `paila009.github.io` after the owner authorized the domain. Interactive public Google sign-in still needs a user acceptance check; browser automation was unavailable in this environment.
 - [ ] Verify a real user-supplied API key through streamed generation, evidence review, and Stop. No provider key has been supplied; mocked provider tests do not establish live access or free billing.
 
